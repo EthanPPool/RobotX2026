@@ -11,7 +11,6 @@ from geometry_msgs.msg import TwistStamped
 from mavros_msgs.msg import State, SysStatus
 from mavros_msgs.srv import CommandBool, SetMode
 from rclpy.node import Node
-from std_msgs.msg import Bool
 from std_srvs.srv import SetBool, Trigger
 
 from boat_interfaces.msg import DetectedObjectArray, Gate
@@ -333,45 +332,6 @@ PAGE = r"""<!DOCTYPE html>
         </div>
 
         <div class="card">
-            <h2>Xbox Operator Controller</h2>
-
-            <div class="small">
-                Input test only. Operator commands do not have
-                propulsion authority yet.
-            </div>
-
-            <div class="row">
-                <span>Controller</span>
-                <span id="gamepadState"
-                      class="value">DISCONNECTED</span>
-            </div>
-
-            <div class="row">
-                <span>Deadman (LB)</span>
-                <span id="deadmanState"
-                      class="value">RELEASED</span>
-            </div>
-
-            <div class="row">
-                <span>Forward</span>
-                <span id="operatorForward"
-                      class="value">0.000 m/s</span>
-            </div>
-
-            <div class="row">
-                <span>Yaw</span>
-                <span id="operatorYaw"
-                      class="value">0.000 rad/s</span>
-            </div>
-
-            <div class="row">
-                <span>Backend</span>
-                <span id="operatorBackend"
-                      class="value">---</span>
-            </div>
-        </div>
-
-        <div class="card">
             <h2>Mission Control</h2>
 
             <button id="resetButton"
@@ -418,173 +378,6 @@ function setState(id, text, state) {
 function finiteNumber(v) {
     return typeof v === "number" && Number.isFinite(v);
 }
-
-
-const GAMEPAD_DEADZONE = 0.12;
-const GAMEPAD_PERIOD_MS = 50;
-
-let operatorPostBusy = false;
-
-
-function applyGamepadDeadzone(value) {
-    value = Number(value) || 0.0;
-
-    const magnitude = Math.abs(value);
-
-    if (magnitude <= GAMEPAD_DEADZONE) {
-        return 0.0;
-    }
-
-    const scaled =
-        (magnitude - GAMEPAD_DEADZONE)
-        / (1.0 - GAMEPAD_DEADZONE);
-
-    return Math.sign(value) * scaled;
-}
-
-
-function findOperatorGamepad() {
-    if (!navigator.getGamepads) {
-        return null;
-    }
-
-    const pads = navigator.getGamepads();
-
-    for (const pad of pads) {
-        if (
-            pad
-            && pad.connected
-            && pad.mapping === "standard"
-        ) {
-            return pad;
-        }
-    }
-
-    for (const pad of pads) {
-        if (pad && pad.connected) {
-            return pad;
-        }
-    }
-
-    return null;
-}
-
-
-async function updateGamepad() {
-    const pad = findOperatorGamepad();
-
-    const connected = !!pad;
-
-    let deadman = false;
-    let forward = 0.0;
-    let yaw = 0.0;
-
-    if (pad) {
-        const leftX = applyGamepadDeadzone(
-            pad.axes[0] || 0.0
-        );
-
-        const leftY = applyGamepadDeadzone(
-            pad.axes[1] || 0.0
-        );
-
-        // Standard mapping: button 4 = LB.
-        deadman = !!(
-            pad.buttons[4]
-            && pad.buttons[4].pressed
-        );
-
-        if (deadman) {
-            // Browser axis 1 is negative forward.
-            forward = -leftY;
-
-            // Positive X = right.
-            yaw = leftX;
-        }
-    }
-
-    setState(
-        "gamepadState",
-        connected
-            ? "CONNECTED"
-            : "DISCONNECTED",
-        connected
-    );
-
-    setState(
-        "deadmanState",
-        deadman
-            ? "HELD"
-            : "RELEASED",
-        deadman ? true : null
-    );
-
-    document.getElementById(
-        "operatorForward"
-    ).textContent =
-        (forward * 0.15).toFixed(3)
-        + " m/s";
-
-    document.getElementById(
-        "operatorYaw"
-    ).textContent =
-        (yaw * 0.15).toFixed(3)
-        + " rad/s";
-
-    if (operatorPostBusy) {
-        return;
-    }
-
-    operatorPostBusy = true;
-
-    try {
-        const response = await fetch(
-            "/api/operator_input",
-            {
-                method: "POST",
-                cache: "no-store",
-                headers: {
-                    "Content-Type":
-                        "application/json"
-                },
-                body: JSON.stringify({
-                    connected: connected,
-                    deadman: deadman,
-                    forward: forward,
-                    yaw: yaw
-                })
-            }
-        );
-
-        const result = await response.json();
-
-        setState(
-            "operatorBackend",
-            result.success
-                ? "RECEIVING"
-                : "REJECTED",
-            result.success
-        );
-
-    } catch (err) {
-        setState(
-            "operatorBackend",
-            "LOST",
-            false
-        );
-
-    } finally {
-        operatorPostBusy = false;
-    }
-}
-
-
-setInterval(
-    updateGamepad,
-    GAMEPAD_PERIOD_MS
-);
-
-updateGamepad();
 
 
 async function refreshStatus() {
@@ -926,21 +719,6 @@ class DashboardNode(Node):
         self.battery_remaining = None
         self.last_battery_time = None
 
-        # Xbox/browser operator input.
-        self.operator_connected = False
-        self.operator_deadman = False
-
-        self.operator_forward = 0.0
-        self.operator_yaw = 0.0
-
-        self.last_operator_input_time = None
-
-        self.operator_max_forward = 0.15
-        self.operator_max_yaw = 0.15
-
-        # Backend watchdog independent of browser display.
-        self.operator_timeout = 0.30
-
         self.control_state = 'BOOT SAFE'
 
         # HTTP handlers may call functions that call other
@@ -987,23 +765,6 @@ class DashboardNode(Node):
             '/mavros/setpoint_velocity/cmd_vel',
             self.bridge_callback,
             10
-        )
-
-        self.operator_pub = self.create_publisher(
-            TwistStamped,
-            '/operator/cmd_vel',
-            10
-        )
-
-        self.operator_deadman_pub = self.create_publisher(
-            Bool,
-            '/operator/deadman',
-            10
-        )
-
-        self.operator_timer = self.create_timer(
-            0.05,
-            self.publish_operator_command
         )
 
         self.estop_client = self.create_client(
@@ -1134,162 +895,6 @@ class DashboardNode(Node):
         self.last_bridge_time = (
             time.monotonic()
         )
-
-    def receive_operator_input(
-        self,
-        payload
-    ):
-        if not isinstance(payload, dict):
-            return (
-                False,
-                'Operator input must be JSON'
-            )
-
-        try:
-            connected = bool(
-                payload.get(
-                    'connected',
-                    False
-                )
-            )
-
-            deadman = bool(
-                payload.get(
-                    'deadman',
-                    False
-                )
-            )
-
-            forward = float(
-                payload.get(
-                    'forward',
-                    0.0
-                )
-            )
-
-            yaw = float(
-                payload.get(
-                    'yaw',
-                    0.0
-                )
-            )
-
-        except (TypeError, ValueError):
-            return (
-                False,
-                'Invalid operator input'
-            )
-
-        if (
-            not math.isfinite(forward)
-            or not math.isfinite(yaw)
-        ):
-            return (
-                False,
-                'Non-finite operator input rejected'
-            )
-
-        forward = max(
-            -1.0,
-            min(1.0, forward)
-        )
-
-        yaw = max(
-            -1.0,
-            min(1.0, yaw)
-        )
-
-        self.operator_connected = connected
-
-        self.operator_deadman = (
-            connected
-            and deadman
-        )
-
-        if self.operator_deadman:
-            self.operator_forward = (
-                forward
-                * self.operator_max_forward
-            )
-
-            self.operator_yaw = (
-                yaw
-                * self.operator_max_yaw
-            )
-
-        else:
-            self.operator_forward = 0.0
-            self.operator_yaw = 0.0
-
-        self.last_operator_input_time = (
-            time.monotonic()
-        )
-
-        return (
-            True,
-            'operator input accepted'
-        )
-
-    def operator_input_is_fresh(self):
-        if self.last_operator_input_time is None:
-            return False
-
-        return (
-            time.monotonic()
-            - self.last_operator_input_time
-        ) <= self.operator_timeout
-
-    def publish_operator_command(self):
-        fresh = self.operator_input_is_fresh()
-
-        active = (
-            fresh
-            and self.operator_connected
-            and self.operator_deadman
-        )
-
-        if active:
-            forward = self.operator_forward
-            yaw = self.operator_yaw
-        else:
-            forward = 0.0
-            yaw = 0.0
-
-        if not fresh:
-            self.operator_deadman = False
-            self.operator_forward = 0.0
-            self.operator_yaw = 0.0
-
-        msg = TwistStamped()
-
-        msg.header.stamp = (
-            self.get_clock().now().to_msg()
-        )
-
-        msg.header.frame_id = 'base_link'
-
-        msg.twist.linear.x = float(
-            forward
-        )
-
-        msg.twist.linear.y = 0.0
-        msg.twist.linear.z = 0.0
-
-        msg.twist.angular.x = 0.0
-        msg.twist.angular.y = 0.0
-
-        msg.twist.angular.z = float(
-            yaw
-        )
-
-        deadman_msg = Bool()
-        deadman_msg.data = bool(active)
-
-        self.operator_deadman_pub.publish(
-            deadman_msg
-        )
-
-        self.operator_pub.publish(msg)
 
     def gate_is_fresh(self):
         if (
@@ -2231,55 +1836,7 @@ class DashboardNode(Node):
                     status=404
                 )
 
-            def read_json_body(self):
-                length = int(
-                    self.headers.get(
-                        'Content-Length',
-                        '0'
-                    )
-                )
-
-                if length <= 0:
-                    return {}
-
-                raw = self.rfile.read(
-                    length
-                )
-
-                return json.loads(
-                    raw.decode('utf-8')
-                )
-
             def do_POST(self):
-                if (
-                    self.path
-                    == '/api/operator_input'
-                ):
-                    try:
-                        payload = (
-                            self.read_json_body()
-                        )
-
-                        success, message = (
-                            node.receive_operator_input(
-                                payload
-                            )
-                        )
-
-                    except Exception as exc:
-                        success = False
-                        message = (
-                            'Operator input error: '
-                            + str(exc)
-                        )
-
-                    self.send_json({
-                        'success': success,
-                        'message': message
-                    })
-
-                    return
-
                 if self.path == '/api/stop':
                     success, message = (
                         node.execute_stop()

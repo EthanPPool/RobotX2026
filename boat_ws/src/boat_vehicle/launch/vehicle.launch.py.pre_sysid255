@@ -36,10 +36,8 @@ def generate_launch_description():
             {
                 'fcu_url': fcu_url,
                 'gcs_url': '',
-                'system_id': 255,
-                'component_id': 191,
-                'target_system_id': 1,
-                'target_component_id': 1,
+                'tgt_system': 1,
+                'tgt_component': 1,
                 'fcu_protocol': 'v2.0',
             },
         ],

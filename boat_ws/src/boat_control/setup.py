@@ -11,6 +11,8 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/boat_control']),
         ('share/boat_control', ['package.xml']),
+        ('share/' + package_name + '/launch', ['launch/two_gate_control.launch.py']),
+        ('share/' + package_name + '/config', ['config/two_gate_follower.yaml']),
         (os.path.join('share', package_name, 'config'), glob.glob(os.path.join('config', '*.yaml'))),
         (os.path.join('share', package_name, 'launch'), glob.glob(os.path.join('launch', '*.launch.py')))
     ],
@@ -24,6 +26,7 @@ setup(
         'console_scripts': [
             'target_controller = boat_control.target_controller:main',
             'simple_gate_follower = boat_control.simple_gate_follower:main',
+            'two_gate_follower = boat_control.two_gate_follower:main',
         ],
     },
 )

@@ -11,7 +11,6 @@ from geometry_msgs.msg import TwistStamped
 from mavros_msgs.msg import State, SysStatus
 from mavros_msgs.srv import CommandBool, SetMode
 from rclpy.node import Node
-from std_msgs.msg import Bool
 from std_srvs.srv import SetBool, Trigger
 
 from boat_interfaces.msg import DetectedObjectArray, Gate
@@ -995,12 +994,6 @@ class DashboardNode(Node):
             10
         )
 
-        self.operator_deadman_pub = self.create_publisher(
-            Bool,
-            '/operator/deadman',
-            10
-        )
-
         self.operator_timer = self.create_timer(
             0.05,
             self.publish_operator_command
@@ -1280,13 +1273,6 @@ class DashboardNode(Node):
 
         msg.twist.angular.z = float(
             yaw
-        )
-
-        deadman_msg = Bool()
-        deadman_msg.data = bool(active)
-
-        self.operator_deadman_pub.publish(
-            deadman_msg
         )
 
         self.operator_pub.publish(msg)
