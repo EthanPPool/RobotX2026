@@ -1,0 +1,5 @@
+min_gate_width: 1.50
+max_gate_width: 6.00
+nominal_gate_width: 3.50
+gate_width_tolerance: 2.50
+width_association_tolerance: 2.00

@@ -135,15 +135,6 @@ class BuoyDetector(Node):
         self.association_distance = float(
             self.declare_parameter('association_distance', 0.55).value
         )
-
-        # Body-frame detections move when the USV translates or
-        # yaws. Increase the association radius slightly with
-        # target range to tolerate this motion.
-        self.association_distance_per_meter = float(
-            self.declare_parameter(
-                'association_distance_per_meter', 0.05
-            ).value
-        )
         self.track_alpha = float(
             self.declare_parameter('track_alpha', 0.65).value
         )
@@ -406,17 +397,7 @@ class BuoyDetector(Node):
         # Greedy nearest-neighbor association.
         for track in list(self.tracks.values()):
             best_idx = None
-
-            track_range = math.hypot(
-                track.x,
-                track.y
-            )
-
-            best_distance = (
-                self.association_distance
-                + self.association_distance_per_meter
-                * track_range
-            )
+            best_distance = self.association_distance
 
             for idx in unmatched:
                 detection = detections[idx]
