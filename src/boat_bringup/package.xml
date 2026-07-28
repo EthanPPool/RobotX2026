@@ -23,4 +23,5 @@
     <build_type>ament_cmake</build_type>
   </export>
   <exec_depend>boat_dashboard</exec_depend>
+  <exec_depend>boat_dashboard_bridge</exec_depend>
 </package>

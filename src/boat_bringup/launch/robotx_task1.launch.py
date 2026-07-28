@@ -13,6 +13,7 @@ from launch.actions import (
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 
 
 def package_launch(package_name, launch_file):
@@ -31,7 +32,9 @@ def generate_launch_description():
     start_perception = LaunchConfiguration('start_perception')
     start_control = LaunchConfiguration('start_control')
     start_vehicle = LaunchConfiguration('start_vehicle')
-    start_dashboard = LaunchConfiguration('start_dashboard')
+    start_dashboard_bridge = LaunchConfiguration(
+        'start_dashboard_bridge'
+    )
     start_esp32 = LaunchConfiguration('start_esp32')
 
     esp32_serial_port = LaunchConfiguration(
@@ -39,7 +42,6 @@ def generate_launch_description():
     )
 
     start_mavros = LaunchConfiguration('start_mavros')
-    autonomy_enabled = LaunchConfiguration('autonomy_enabled')
     fcu_url = LaunchConfiguration('fcu_url')
 
     arguments = [
@@ -64,8 +66,12 @@ def generate_launch_description():
         ),
 
         DeclareLaunchArgument(
-            'start_dashboard',
+            'start_dashboard_bridge',
             default_value='true',
+            description=(
+                'Start Jetson TCP bridge for the '
+                'RobotX ground station.'
+            ),
         ),
 
         DeclareLaunchArgument(
@@ -83,12 +89,6 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'start_mavros',
             default_value='true',
-        ),
-
-        DeclareLaunchArgument(
-            'autonomy_enabled',
-            default_value='false',
-            description='Safety gate. Leave FALSE at startup.',
         ),
 
         DeclareLaunchArgument(
@@ -130,17 +130,18 @@ def generate_launch_description():
         condition=IfCondition(start_vehicle),
         launch_arguments={
             'start_mavros': start_mavros,
-            'autonomy_enabled': autonomy_enabled,
             'fcu_url': fcu_url,
         }.items(),
     )
 
-    dashboard = IncludeLaunchDescription(
-        package_launch(
-            'boat_dashboard',
-            'dashboard.launch.py',
+    dashboard_bridge = Node(
+        package='boat_dashboard_bridge',
+        executable='bridge',
+        name='boat_dashboard_bridge',
+        output='screen',
+        condition=IfCondition(
+            start_dashboard_bridge
         ),
-        condition=IfCondition(start_dashboard),
     )
 
     esp32_status = IncludeLaunchDescription(
@@ -163,6 +164,7 @@ def generate_launch_description():
             ' Perception 3D : ON (point cloud -> buoys -> gate)\n'
             ' Two-gate ctrl : ON\n'
             ' Vehicle safety: ON\n'
+            ' TCP bridge    : ON\n'
             ' Xbox operator : ON via dashboard/bridge\n'
             ' Dashboard     : ON\n'
             ' ESP32/light   : ON\n'
@@ -170,9 +172,7 @@ def generate_launch_description():
             ' OLD por_gate_mission: NOT STARTED\n'
             ' OLD target_controller: NOT STARTED\n'
             '\n'
-            ' autonomy_enabled = ',
-            autonomy_enabled,
-            '\n'
+            ' Bridge parameters loaded from bridge.yaml.\n'
             ' Startup remains SOFTWARE-STOPPED / DISARMED.\n'
             '============================================================'
         ]
@@ -185,7 +185,7 @@ def generate_launch_description():
             perception,
             control,
             vehicle,
-            dashboard,
+            dashboard_bridge,
             esp32_status,
         ]
     )

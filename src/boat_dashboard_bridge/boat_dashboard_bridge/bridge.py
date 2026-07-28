@@ -12,7 +12,7 @@ from mavros_msgs.msg import State, SysStatus
 from mavros_msgs.srv import CommandBool, SetMode
 from rclpy.node import Node
 from sensor_msgs.msg import BatteryState, Imu, NavSatFix
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from std_srvs.srv import SetBool, Trigger
 
 from boat_interfaces.msg import DetectedObjectArray, Gate
@@ -39,6 +39,18 @@ class BoatDashboardBridge(Node):
         self.battery_last_rx = None
         self.gate_last_rx = None
         self.bridge_last_rx = None
+
+        # Browser/Xbox operator input. Input arrives from
+        # Beeptop over TCP and is republished locally on ROS.
+        self.operator_connected = False
+        self.operator_deadman = False
+        self.operator_forward = 0.0
+        self.operator_yaw = 0.0
+        self.operator_last_rx = None
+
+        self.operator_timeout = 0.30
+        self.operator_max_forward = 0.15
+        self.operator_max_yaw = 0.15
 
         self.telemetry = {
             "connected": False,
@@ -168,6 +180,26 @@ class BoatDashboardBridge(Node):
         self.reset_client = self.create_client(
             Trigger,
             "/control/reset_mission",
+        )
+
+        self.operator_pub = self.create_publisher(
+            TwistStamped,
+            "/operator/cmd_vel",
+            10,
+        )
+
+        self.operator_deadman_pub = self.create_publisher(
+            Bool,
+            "/operator/deadman",
+            10,
+        )
+
+        # Keep publishing operator state locally at 20 Hz.
+        # If TCP/browser input goes stale, publish neutral and
+        # release the deadman automatically.
+        self.create_timer(
+            0.05,
+            self.publish_operator_command,
         )
 
         # 5 Hz output to ground station
@@ -1040,6 +1072,136 @@ class BoatDashboardBridge(Node):
             )
 
     # ========================================================
+    # REMOTE OPERATOR INPUT
+    # ========================================================
+
+    def receive_operator_input(self, data):
+        if not isinstance(data, dict):
+            return
+
+        connected = bool(
+            data.get("connected", False)
+        )
+
+        deadman = bool(
+            data.get("deadman", False)
+        )
+
+        try:
+            forward = float(
+                data.get("forward", 0.0)
+            )
+            yaw = float(
+                data.get("yaw", 0.0)
+            )
+        except (TypeError, ValueError):
+            connected = False
+            deadman = False
+            forward = 0.0
+            yaw = 0.0
+
+        if not math.isfinite(forward):
+            forward = 0.0
+
+        if not math.isfinite(yaw):
+            yaw = 0.0
+
+        forward = max(
+            -1.0,
+            min(1.0, forward),
+        )
+
+        yaw = max(
+            -1.0,
+            min(1.0, yaw),
+        )
+
+        with self.lock:
+            self.operator_connected = connected
+
+            self.operator_deadman = bool(
+                connected and deadman
+            )
+
+            if self.operator_deadman:
+                self.operator_forward = (
+                    forward
+                    * self.operator_max_forward
+                )
+
+                self.operator_yaw = (
+                    yaw
+                    * self.operator_max_yaw
+                )
+            else:
+                self.operator_forward = 0.0
+                self.operator_yaw = 0.0
+
+            self.operator_last_rx = (
+                time.monotonic()
+            )
+
+    def publish_operator_command(self):
+        now = time.monotonic()
+
+        with self.lock:
+            fresh = bool(
+                self.operator_last_rx is not None
+                and
+                (
+                    now - self.operator_last_rx
+                ) <= self.operator_timeout
+            )
+
+            active = bool(
+                fresh
+                and self.operator_connected
+                and self.operator_deadman
+            )
+
+            if active:
+                forward = self.operator_forward
+                yaw = self.operator_yaw
+            else:
+                forward = 0.0
+                yaw = 0.0
+
+                if not fresh:
+                    self.operator_deadman = False
+                    self.operator_forward = 0.0
+                    self.operator_yaw = 0.0
+
+        cmd = TwistStamped()
+        cmd.header.stamp = (
+            self.get_clock().now().to_msg()
+        )
+        cmd.header.frame_id = "base_link"
+        cmd.twist.linear.x = float(forward)
+        cmd.twist.angular.z = float(yaw)
+
+        deadman = Bool()
+        deadman.data = bool(active)
+
+        self.operator_deadman_pub.publish(
+            deadman
+        )
+
+        self.operator_pub.publish(cmd)
+
+    def release_operator(self):
+        with self.lock:
+            self.operator_connected = False
+            self.operator_deadman = False
+            self.operator_forward = 0.0
+            self.operator_yaw = 0.0
+            self.operator_last_rx = None
+
+        # Immediate neutral/release instead of waiting for
+        # the next watchdog timer tick.
+        self.publish_operator_command()
+
+
+    # ========================================================
     # TCP SERVER
     # ========================================================
 
@@ -1130,12 +1292,20 @@ class BoatDashboardBridge(Node):
             except OSError:
                 pass
 
+            self.release_operator()
+
             self.get_logger().info(
                 "Ground station disconnected"
             )
 
     def handle_message(self, client, message):
         if not isinstance(message, dict):
+            return
+
+        if message.get("type") == "operator_input":
+            self.receive_operator_input(
+                message.get("data", {})
+            )
             return
 
         if message.get("type") != "command":
