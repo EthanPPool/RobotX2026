@@ -5,6 +5,8 @@ import math
 import rclpy
 from geometry_msgs.msg import TwistStamped
 from rclpy.node import Node
+from rclpy.parameter import Parameter
+from std_srvs.srv import SetBool
 
 from boat_interfaces.msg import Gate
 
@@ -97,6 +99,12 @@ class SimpleGateFollower(Node):
             10
         )
 
+        self.enable_srv = self.create_service(
+            SetBool,
+            '/control/set_enabled',
+            self.enable_callback
+        )
+
         # 20 Hz command/deadman loop.
         self.timer = self.create_timer(
             0.05,
@@ -131,19 +139,70 @@ class SimpleGateFollower(Node):
         self.last_gate = msg
         self.last_gate_time = self.get_clock().now()
 
+    def enable_callback(self, request, response):
+        enabled = bool(request.data)
+
+        self.set_parameters([
+            Parameter(
+                'enabled',
+                Parameter.Type.BOOL,
+                enabled
+            )
+        ])
+
+        # Every enable/disable transition starts from zero.
+        # This prevents an old gate detection from immediately
+        # producing motion after enabling.
+        self.last_gate = None
+        self.last_gate_time = None
+
+        self.publish_zero()
+
+        if enabled:
+            response.success = True
+            response.message = (
+                'Simple gate follower enabled; '
+                'waiting for fresh valid gate'
+            )
+
+            self.get_logger().warn(
+                'GATE FOLLOWER ENABLED: '
+                'fresh valid gate required before motion'
+            )
+
+        else:
+            response.success = True
+            response.message = (
+                'Simple gate follower disabled; '
+                'command forced to zero'
+            )
+
+            self.get_logger().warn(
+                'GATE FOLLOWER DISABLED'
+            )
+
+        return response
+
     def publish_zero(self) -> None:
+        """Publish an explicit zero velocity command."""
+
         cmd = TwistStamped()
         cmd.header.stamp = self.get_clock().now().to_msg()
         cmd.header.frame_id = 'base_link'
 
         cmd.twist.linear.x = 0.0
+        cmd.twist.linear.y = 0.0
+        cmd.twist.linear.z = 0.0
+
+        cmd.twist.angular.x = 0.0
+        cmd.twist.angular.y = 0.0
         cmd.twist.angular.z = 0.0
 
         self.cmd_pub.publish(cmd)
 
     def update(self) -> None:
-        # Read the parameter every cycle so it can later be changed
-        # dynamically by the test dashboard.
+        # Read enabled every cycle so it can be changed
+        # dynamically through /control/set_enabled.
         enabled = bool(
             self.get_parameter('enabled').value
         )
@@ -155,7 +214,7 @@ class SimpleGateFollower(Node):
             return
 
         # Rule 2:
-        # No gate = no movement.
+        # No valid gate = no movement.
         if (
             self.last_gate is None
             or self.last_gate_time is None
@@ -188,11 +247,16 @@ class SimpleGateFollower(Node):
             self.publish_zero()
             return
 
-        # Angle from the bow to the gate center.
+        # Calculate angle from boat bow to gate center.
+        #
+        # x = forward
+        # y = left/right
         heading_error = math.atan2(y, x)
 
+        # Simple proportional steering.
         yaw_rate = self.yaw_kp * heading_error
 
+        # Clamp steering rate.
         yaw_rate = max(
             -self.max_yaw_rate,
             min(
@@ -201,11 +265,11 @@ class SimpleGateFollower(Node):
             )
         )
 
-        # Default remains zero forward motion.
+        # Default is always zero forward speed.
         forward = 0.0
 
-        # Only allow forward motion when the bow is already
-        # reasonably aligned with the gate.
+        # Only move forward when the gate is reasonably
+        # centered in front of the boat.
         if abs(heading_error) <= self.forward_enable_angle:
             forward = self.forward_speed
 
@@ -214,6 +278,11 @@ class SimpleGateFollower(Node):
         cmd.header.frame_id = 'base_link'
 
         cmd.twist.linear.x = float(forward)
+        cmd.twist.linear.y = 0.0
+        cmd.twist.linear.z = 0.0
+
+        cmd.twist.angular.x = 0.0
+        cmd.twist.angular.y = 0.0
         cmd.twist.angular.z = float(yaw_rate)
 
         self.cmd_pub.publish(cmd)
@@ -226,8 +295,10 @@ def main(args=None):
 
     try:
         rclpy.spin(node)
+
     except KeyboardInterrupt:
         pass
+
     finally:
         node.destroy_node()
         rclpy.shutdown()
