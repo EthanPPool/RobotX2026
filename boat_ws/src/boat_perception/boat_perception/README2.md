@@ -1,3 +1,5 @@
+Notes for Gates
+
 Imports:
   
   - Loads ROS 2, math, pair-generation utilities, RViz markers, and your custom DetectedObject, DetectedObjectArray, and Gate messages.
