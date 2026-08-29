@@ -1,0 +1,223 @@
+<?xml version="1.0"?>
+
+<robot name="blueboat" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!--
+    BlueBoat body frame.
+
+    ROS convention:
+      +X = forward
+      +Y = left / port
+      +Z = up
+
+    We are initially preserving the mesh's native coordinate system.
+  -->
+<link name="base_link">
+
+  <!-- Main hulls -->
+  <visual name="hull_visual">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <mesh
+        filename="package://boat_description/meshes/blueboat_hull.dae"
+        scale="1 1 1"/>
+    </geometry>
+  </visual>
+
+  <!-- Crosstubes -->
+  <visual name="crosstube_visual">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <mesh
+        filename="package://boat_description/meshes/blueboat_crosstube.dae"
+        scale="1 1 1"/>
+    </geometry>
+  </visual>
+
+  <!-- Forward frame assembly -->
+  <visual name="frame_asm_fore_visual">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <mesh
+        filename="package://boat_description/meshes/blueboat_frame_asm_fore.dae"
+        scale="1 1 1"/>
+    </geometry>
+  </visual>
+
+  <!-- Aft frame assembly -->
+  <visual name="frame_asm_aft_visual">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <mesh
+        filename="package://boat_description/meshes/blueboat_frame_asm_aft.dae"
+        scale="1 1 1"/>
+    </geometry>
+  </visual>
+
+  <!-- Starboard hatch -->
+  <visual name="hatch_asm_stbd_visual">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <mesh
+        filename="package://boat_description/meshes/blueboat_hatch_asm_stbd.dae"
+        scale="1 1 1"/>
+    </geometry>
+  </visual>
+
+  <!-- Port hatch -->
+  <visual name="hatch_asm_port_visual">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <mesh
+        filename="package://boat_description/meshes/blueboat_hatch_asm_port.dae"
+        scale="1 1 1"/>
+    </geometry>
+  </visual>
+
+  <!-- Starboard motor housing -->
+  <visual name="motor_stbd_visual">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <mesh
+        filename="package://boat_description/meshes/blueboat_motor_stbd.dae"
+        scale="1 1 1"/>
+    </geometry>
+  </visual>
+
+  <!-- Port motor housing -->
+  <visual name="motor_port_visual">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <mesh
+        filename="package://boat_description/meshes/blueboat_motor_port.dae"
+        scale="1 1 1"/>
+    </geometry>
+  </visual>
+
+  <!-- Aerial / antenna -->
+  <visual name="aerial_visual">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <mesh
+        filename="package://boat_description/meshes/blueboat_aerial.dae"
+        scale="1 1 1"/>
+    </geometry>
+  </visual>
+
+  <!-- Flag -->
+  <visual name="flag_visual">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <mesh
+        filename="package://boat_description/meshes/blueboat_flag.dae"
+        scale="1 1 1"/>
+    </geometry>
+  </visual>
+
+  <!-- Simplified hull collision geometry -->
+  <collision name="hull_collision">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+
+    <geometry>
+      <mesh
+        filename="package://boat_description/meshes/blueboat_hull_collision.stl"
+        scale="1 1 1"/>
+    </geometry>
+  </collision>
+
+</link>
+
+  <!-- ========================================================= -->
+  <!-- Starboard Propeller                                      -->
+  <!-- ========================================================= -->
+
+  <link name="prop_stbd_link">
+
+    <visual name="prop_stbd_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+
+      <geometry>
+        <mesh
+          filename="package://boat_description/meshes/blueboat_prop_stbd.dae"
+          scale="1 1 1"/>
+      </geometry>
+    </visual>
+
+  </link>
+
+
+  <joint name="prop_stbd_joint" type="fixed">
+
+    <parent link="base_link"/>
+    <child link="prop_stbd_link"/>
+
+    <origin
+      xyz="-0.488 -0.295 -0.272"
+      rpy="-1.57079632679 0 1.57079632679"/>
+
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- Port Propeller                                           -->
+  <!-- ========================================================= -->
+
+  <link name="prop_port_link">
+
+    <visual name="prop_port_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+
+      <geometry>
+        <mesh
+          filename="package://boat_description/meshes/blueboat_prop_port.dae"
+          scale="1 1 1"/>
+      </geometry>
+    </visual>
+
+  </link>
+
+
+  <joint name="prop_port_joint" type="fixed">
+
+    <parent link="base_link"/>
+    <child link="prop_port_link"/>
+
+    <origin
+      xyz="-0.488 0.295 -0.272"
+      rpy="-1.57079632679 0 1.57079632679"/>
+
+  </joint>
+
+  <!-- ========================================================= -->
+  <!-- Unitree L2 LiDAR                                         -->
+  <!-- ========================================================= -->
+
+  <!-- Intermediate LiDAR mounting orientation -->
+  <link name="lidar_mount_link"/>
+
+  <joint name="lidar_mount_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="lidar_mount_link"/>
+
+    <!-- Measured LiDAR position relative to base_link -->
+    <origin
+      xyz="0.3187 0 0.047175"
+      rpy="0 1.57079632679 0"/>
+  </joint>
+
+
+<!-- Final Unitree LiDAR frame -->
+
+  <link name="lidar_link"/>
+
+  <joint name="lidar_orientation_joint" type="fixed">
+    <parent link="lidar_mount_link"/>
+    <child link="lidar_link"/>
+
+    <!-- 115 degrees about the NEW Z axis -->
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 2.00712863979"/>
+  </joint>
+  
+</robot>

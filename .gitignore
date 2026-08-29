@@ -1,0 +1,27 @@
+# ROS 2 / colcon
+**/build/
+**/install/
+**/log/
+
+# Python
+**/__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# ROS bags
+*.db3
+*.mcap
+rosbag2_*/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary files
+*.tmp
+*.bak
+*~

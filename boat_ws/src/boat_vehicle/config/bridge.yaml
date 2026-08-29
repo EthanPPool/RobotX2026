@@ -1,0 +1,13 @@
+mavros_command_bridge:
+  ros__parameters:
+    input_topic: "/control/cmd_vel"
+    output_topic: "/mavros/setpoint_velocity/cmd_vel"
+    state_topic: "/mavros/state"
+
+    autonomy_enabled: false
+    allowed_modes: ["GUIDED"]
+    deadman_timeout: 0.35
+    publish_rate: 20.0
+
+    max_forward_speed: 0.60
+    max_yaw_rate: 0.50

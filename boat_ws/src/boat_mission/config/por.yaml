@@ -1,0 +1,19 @@
+por_gate_mission:
+  ros__parameters:
+    gate_topic: "/perception/gate"
+    target_topic: "/mission/target"
+    state_topic: "/mission/state"
+
+    gate_timeout: 0.60
+    gate_confirm_duration: 0.75
+    min_gate_confidence: 0.80
+    gate_pass_x: 1.10
+    clear_duration: 5.0
+    clear_target_x: 3.0
+
+    approach_speed: 0.40
+    near_gate_speed: 0.28
+    near_gate_x: 3.0
+    clear_speed: 0.35
+
+    gates_required: 2
