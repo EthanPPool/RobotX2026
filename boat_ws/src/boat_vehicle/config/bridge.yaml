@@ -12,6 +12,7 @@ mavros_command_bridge:
 
     # Stop forwarding if control commands stop arriving.
     deadman_timeout: 0.25
+    initial_command_timeout: 0.75
     publish_rate: 20.0
 
     # Intentionally conservative initial water-test limits.

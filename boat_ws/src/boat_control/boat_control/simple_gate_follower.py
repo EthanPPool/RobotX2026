@@ -6,13 +6,30 @@ import rclpy
 from geometry_msgs.msg import TwistStamped
 from rclpy.node import Node
 from rclpy.parameter import Parameter
-from std_srvs.srv import SetBool
+from std_srvs.srv import SetBool, Trigger
 
 from boat_interfaces.msg import Gate
 
 
 class SimpleGateFollower(Node):
-    """Fail-stop controller that slowly drives toward a confirmed gate center."""
+    """Simple single-gate mission controller.
+
+    The node remains running continuously.
+
+    Mission states:
+
+        SEARCH / APPROACH
+            Track the confirmed gate and drive toward its center.
+
+        PASSING
+            Entered once the gate center becomes sufficiently close.
+
+        COMPLETE
+            Latched once the previously-close gate disappears or the
+            detector jumps to a substantially farther gate.
+
+    COMPLETE remains latched until /control/reset_mission is called.
+    """
 
     def __init__(self):
         super().__init__('simple_gate_follower')
@@ -27,8 +44,11 @@ class SimpleGateFollower(Node):
             '/control/cmd_vel'
         ).value
 
-        # Motion is DISABLED by default.
-        self.declare_parameter('enabled', False)
+        # Keep the controller running by default.
+        self.declare_parameter('enabled', True)
+
+        # Exposed for diagnostics/dashboard.
+        self.declare_parameter('mission_complete', False)
 
         self.min_gate_confidence = float(
             self.declare_parameter(
@@ -83,8 +103,39 @@ class SimpleGateFollower(Node):
             ).value
         )
 
+        # Once the gate has been this close, we know that we are
+        # actually entering/passing the intended gate.
+        self.pass_arm_distance = float(
+            self.declare_parameter(
+                'pass_arm_distance',
+                1.50
+            ).value
+        )
+
+        # Once passage has been armed, losing the gate for this long
+        # is interpreted as having passed through it.
+        self.pass_loss_timeout = float(
+            self.declare_parameter(
+                'pass_loss_timeout',
+                0.40
+            ).value
+        )
+
+        # If we were close to the gate and the detector suddenly
+        # chooses a much farther pair of objects, treat that as the
+        # original gate having passed behind the boat.
+        self.pass_jump_distance = float(
+            self.declare_parameter(
+                'pass_jump_distance',
+                1.00
+            ).value
+        )
+
         self.last_gate = None
         self.last_gate_time = None
+
+        self.passage_armed = False
+        self.closest_gate_x = math.inf
 
         self.cmd_pub = self.create_publisher(
             TwistStamped,
@@ -99,26 +150,47 @@ class SimpleGateFollower(Node):
             10
         )
 
+        # Kept for compatibility, but normal operation should leave
+        # this node enabled continuously.
         self.enable_srv = self.create_service(
             SetBool,
             '/control/set_enabled',
             self.enable_callback
         )
 
-        # 20 Hz command/deadman loop.
+        self.reset_srv = self.create_service(
+            Trigger,
+            '/control/reset_mission',
+            self.reset_callback
+        )
+
         self.timer = self.create_timer(
             0.05,
             self.update
         )
 
         self.get_logger().info(
-            'Simple gate follower started DISABLED. '
-            'No valid fresh gate = zero motion.'
+            'Simple gate follower started ENABLED. '
+            'Waiting for a confirmed gate.'
         )
 
-    def gate_callback(self, msg: Gate) -> None:
-        """Accept only a finite, sufficiently confident gate in front of the boat."""
+    def mission_is_complete(self):
+        return bool(
+            self.get_parameter(
+                'mission_complete'
+            ).value
+        )
 
+    def set_mission_complete(self, complete):
+        self.set_parameters([
+            Parameter(
+                'mission_complete',
+                Parameter.Type.BOOL,
+                bool(complete)
+            )
+        ])
+
+    def gate_callback(self, msg: Gate) -> None:
         x = float(msg.center.x)
         y = float(msg.center.y)
         confidence = float(msg.confidence)
@@ -131,50 +203,104 @@ class SimpleGateFollower(Node):
             and confidence >= self.min_gate_confidence
         )
 
+        # Do not destroy the previous valid detection immediately.
+        # The update loop handles freshness/timeouts.
         if not valid:
-            self.last_gate = None
-            self.last_gate_time = None
             return
+
+        if self.mission_is_complete():
+            return
+
+        # If passage has already been armed and we suddenly detect a
+        # gate substantially farther away, it is probably a new pair
+        # after the original gate moved behind the boat.
+        if self.passage_armed:
+            jump_threshold = max(
+                self.pass_arm_distance + 0.25,
+                self.closest_gate_x
+                + self.pass_jump_distance
+            )
+
+            if x >= jump_threshold:
+                self.complete_mission(
+                    'gate passed: detector jumped '
+                    f'from {self.closest_gate_x:.2f} m '
+                    f'to {x:.2f} m'
+                )
+                return
 
         self.last_gate = msg
         self.last_gate_time = self.get_clock().now()
 
+        if x < self.closest_gate_x:
+            self.closest_gate_x = x
+
+        if (
+            not self.passage_armed
+            and x <= self.pass_arm_distance
+        ):
+            self.passage_armed = True
+            self.closest_gate_x = x
+
+            self.get_logger().warn(
+                'GATE PASSAGE ARMED: '
+                f'gate center is {x:.2f} m ahead'
+            )
+
     def enable_callback(self, request, response):
-        enabled = bool(request.data)
+        requested = bool(request.data)
+
+        currently_enabled = bool(
+            self.get_parameter('enabled').value
+        )
+
+        # Repeating "enable" must not wipe a valid gate.
+        if requested == currently_enabled:
+            response.success = True
+            response.message = (
+                'Gate follower already '
+                + ('enabled' if requested else 'disabled')
+            )
+            return response
 
         self.set_parameters([
             Parameter(
                 'enabled',
                 Parameter.Type.BOOL,
-                enabled
+                requested
             )
         ])
 
-        # Every enable/disable transition starts from zero.
-        # This prevents an old gate detection from immediately
-        # producing motion after enabling.
-        self.last_gate = None
-        self.last_gate_time = None
+        if requested:
+            # Do not reset mission_complete here.
+            # A completed mission requires an explicit reset.
+            self.last_gate = None
+            self.last_gate_time = None
 
-        self.publish_zero()
-
-        if enabled:
             response.success = True
-            response.message = (
-                'Simple gate follower enabled; '
-                'waiting for fresh valid gate'
-            )
+
+            if self.mission_is_complete():
+                response.message = (
+                    'Follower enabled, but mission COMPLETE '
+                    'remains latched; reset required'
+                )
+            else:
+                response.message = (
+                    'Gate follower enabled'
+                )
 
             self.get_logger().warn(
-                'GATE FOLLOWER ENABLED: '
-                'fresh valid gate required before motion'
+                'GATE FOLLOWER ENABLED'
             )
 
         else:
+            self.last_gate = None
+            self.last_gate_time = None
+            self.publish_zero()
+
             response.success = True
             response.message = (
-                'Simple gate follower disabled; '
-                'command forced to zero'
+                'Gate follower disabled'
             )
 
             self.get_logger().warn(
@@ -183,11 +309,55 @@ class SimpleGateFollower(Node):
 
         return response
 
-    def publish_zero(self) -> None:
-        """Publish an explicit zero velocity command."""
+    def reset_callback(self, request, response):
+        self.set_mission_complete(False)
 
+        self.last_gate = None
+        self.last_gate_time = None
+
+        self.passage_armed = False
+        self.closest_gate_x = math.inf
+
+        self.publish_zero()
+
+        response.success = True
+        response.message = (
+            'Gate mission reset; waiting for fresh gate'
+        )
+
+        self.get_logger().warn(
+            'GATE MISSION RESET'
+        )
+
+        return response
+
+    def complete_mission(self, reason):
+        if self.mission_is_complete():
+            return
+
+        self.set_mission_complete(True)
+
+        self.last_gate = None
+        self.last_gate_time = None
+
+        self.passage_armed = False
+
+        # A zero command is intentional here. The command bridge
+        # interprets all-zero as STOP and transitions ArduRover to HOLD.
+        self.publish_zero()
+
+        self.get_logger().error(
+            'GATE MISSION COMPLETE: '
+            f'{reason}. STOP requested.'
+        )
+
+    def publish_zero(self):
         cmd = TwistStamped()
-        cmd.header.stamp = self.get_clock().now().to_msg()
+
+        cmd.header.stamp = (
+            self.get_clock().now().to_msg()
+        )
+
         cmd.header.frame_id = 'base_link'
 
         cmd.twist.linear.x = 0.0
@@ -200,21 +370,21 @@ class SimpleGateFollower(Node):
 
         self.cmd_pub.publish(cmd)
 
-    def update(self) -> None:
-        # Read enabled every cycle so it can be changed
-        # dynamically through /control/set_enabled.
+    def update(self):
         enabled = bool(
             self.get_parameter('enabled').value
         )
 
-        # Rule 1:
-        # Explicit enable is required before ANY motion is possible.
         if not enabled:
             self.publish_zero()
             return
 
-        # Rule 2:
-        # No valid gate = no movement.
+        # Completed missions remain stopped indefinitely until
+        # /control/reset_mission is called.
+        if self.mission_is_complete():
+            self.publish_zero()
+            return
+
         if (
             self.last_gate is None
             or self.last_gate_time is None
@@ -222,23 +392,30 @@ class SimpleGateFollower(Node):
             self.publish_zero()
             return
 
-        # Rule 3:
-        # Stale gate = immediate stop.
         age = (
             self.get_clock().now()
             - self.last_gate_time
         ).nanoseconds / 1e9
 
         if age > self.gate_timeout:
-            self.last_gate = None
-            self.last_gate_time = None
+            # If we were already very close to the gate and then lost
+            # it, that is the expected signature of passing through it.
+            if (
+                self.passage_armed
+                and age >= self.pass_loss_timeout
+            ):
+                self.complete_mission(
+                    'previously-close gate '
+                    f'lost for {age:.2f} s'
+                )
+                return
+
             self.publish_zero()
             return
 
         x = float(self.last_gate.center.x)
         y = float(self.last_gate.center.y)
 
-        # Extra defensive validation.
         if (
             not math.isfinite(x)
             or not math.isfinite(y)
@@ -247,16 +424,28 @@ class SimpleGateFollower(Node):
             self.publish_zero()
             return
 
-        # Calculate angle from boat bow to gate center.
-        #
-        # x = forward
-        # y = left/right
+        if x < self.closest_gate_x:
+            self.closest_gate_x = x
+
+        if (
+            not self.passage_armed
+            and x <= self.pass_arm_distance
+        ):
+            self.passage_armed = True
+            self.closest_gate_x = x
+
+            self.get_logger().warn(
+                'GATE PASSAGE ARMED: '
+                f'gate center is {x:.2f} m ahead'
+            )
+
         heading_error = math.atan2(y, x)
 
-        # Simple proportional steering.
-        yaw_rate = self.yaw_kp * heading_error
+        yaw_rate = (
+            self.yaw_kp
+            * heading_error
+        )
 
-        # Clamp steering rate.
         yaw_rate = max(
             -self.max_yaw_rate,
             min(
@@ -265,16 +454,20 @@ class SimpleGateFollower(Node):
             )
         )
 
-        # Default is always zero forward speed.
         forward = 0.0
 
-        # Only move forward when the gate is reasonably
-        # centered in front of the boat.
-        if abs(heading_error) <= self.forward_enable_angle:
+        if (
+            abs(heading_error)
+            <= self.forward_enable_angle
+        ):
             forward = self.forward_speed
 
         cmd = TwistStamped()
-        cmd.header.stamp = self.get_clock().now().to_msg()
+
+        cmd.header.stamp = (
+            self.get_clock().now().to_msg()
+        )
+
         cmd.header.frame_id = 'base_link'
 
         cmd.twist.linear.x = float(forward)

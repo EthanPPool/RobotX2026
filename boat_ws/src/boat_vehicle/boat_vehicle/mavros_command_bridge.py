@@ -1,37 +1,45 @@
 #!/usr/bin/env python3
 
 import copy
-import signal
+import math
 import time
 
 import rclpy
 from geometry_msgs.msg import TwistStamped
 from mavros_msgs.msg import State
+from mavros_msgs.srv import SetMode
 from rclpy.node import Node
 from rclpy.parameter import Parameter
-from rclpy.signals import SignalHandlerOptions
 from std_srvs.srv import SetBool
 
 
 class MavrosCommandBridge(Node):
     """Safety boundary between autonomy commands and MAVROS.
 
-    Propulsion commands are forwarded only when:
-      - software E-stop is cleared
-      - autonomy is explicitly enabled
-      - MAVROS is connected
-      - vehicle is armed
-      - ArduRover is in an allowed mode
-      - a fresh command exists
+    Normal running:
+        fresh non-zero Twist
+        + software stop cleared
+        + autonomy enabled
+        + MAVROS connected
+        + GUIDED
+        -> MAVROS velocity stream
 
-    Otherwise a zero velocity command is published.
+    The velocity stream is intentionally allowed while DISARMED.
+    This lets the current autonomous setpoint be established BEFORE
+    the vehicle is armed.
+
+    Safety stop:
+        stop publishing
+        disable autonomy
+        request HOLD
     """
 
     def __init__(self):
         super().__init__('mavros_command_bridge')
 
         self.input_topic = self.declare_parameter(
-            'input_topic', '/control/cmd_vel'
+            'input_topic',
+            '/control/cmd_vel'
         ).value
 
         self.output_topic = self.declare_parameter(
@@ -40,52 +48,107 @@ class MavrosCommandBridge(Node):
         ).value
 
         self.state_topic = self.declare_parameter(
-            'state_topic', '/mavros/state'
+            'state_topic',
+            '/mavros/state'
         ).value
 
-        # BOOT-SAFE DEFAULTS
-        self.declare_parameter('autonomy_enabled', False)
-        self.declare_parameter('software_estop', True)
+        self.set_mode_service = self.declare_parameter(
+            'set_mode_service',
+            '/mavros/set_mode'
+        ).value
 
-        self.allowed_modes = list(
+        self.stop_mode = str(
             self.declare_parameter(
-                'allowed_modes', ['GUIDED']
+                'stop_mode',
+                'HOLD'
             ).value
+        ).upper()
+
+        self.declare_parameter(
+            'autonomy_enabled',
+            False
         )
+
+        self.declare_parameter(
+            'software_estop',
+            True
+        )
+
+        self.allowed_modes = [
+            str(mode).upper()
+            for mode in self.declare_parameter(
+                'allowed_modes',
+                ['GUIDED']
+            ).value
+        ]
 
         self.deadman_timeout = float(
             self.declare_parameter(
-                'deadman_timeout', 0.25
+                'deadman_timeout',
+                0.25
+            ).value
+        )
+
+        # Gives the continuously-running follower time to publish
+        # a new command after autonomy is enabled.
+        self.initial_command_timeout = float(
+            self.declare_parameter(
+                'initial_command_timeout',
+                0.75
             ).value
         )
 
         self.publish_rate = float(
             self.declare_parameter(
-                'publish_rate', 20.0
+                'publish_rate',
+                20.0
             ).value
         )
 
         self.max_forward_speed = float(
             self.declare_parameter(
-                'max_forward_speed', 0.15
+                'max_forward_speed',
+                0.15
             ).value
         )
 
         self.max_yaw_rate = float(
             self.declare_parameter(
-                'max_yaw_rate', 0.15
+                'max_yaw_rate',
+                0.15
             ).value
         )
 
-        self.shutdown_zero_duration = float(
+        self.zero_command_epsilon = float(
             self.declare_parameter(
-                'shutdown_zero_duration', 0.50
+                'zero_command_epsilon',
+                1.0e-4
+            ).value
+        )
+
+        self.hold_retry_period = float(
+            self.declare_parameter(
+                'hold_retry_period',
+                0.50
+            ).value
+        )
+
+        self.shutdown_hold_timeout = float(
+            self.declare_parameter(
+                'shutdown_hold_timeout',
+                1.00
             ).value
         )
 
         self.last_command = None
         self.last_command_time = None
+        self.autonomy_enable_time = None
         self.vehicle_state = None
+
+        self.hold_required = True
+        self.hold_future = None
+        self.last_hold_request_monotonic = 0.0
+        self.last_stop_reason = None
 
         self.cmd_pub = self.create_publisher(
             TwistStamped,
@@ -93,27 +156,32 @@ class MavrosCommandBridge(Node):
             10
         )
 
-        self.cmd_sub = self.create_subscription(
+        self.create_subscription(
             TwistStamped,
             self.input_topic,
             self.command_callback,
             10
         )
 
-        self.state_sub = self.create_subscription(
+        self.create_subscription(
             State,
             self.state_topic,
             self.state_callback,
             10
         )
 
-        self.estop_srv = self.create_service(
+        self.mode_client = self.create_client(
+            SetMode,
+            self.set_mode_service
+        )
+
+        self.create_service(
             SetBool,
             '/vehicle/software_estop',
             self.estop_callback
         )
 
-        self.autonomy_srv = self.create_service(
+        self.create_service(
             SetBool,
             '/vehicle/set_autonomy',
             self.autonomy_callback
@@ -125,29 +193,160 @@ class MavrosCommandBridge(Node):
         )
 
         self.get_logger().warn(
-            'BOOT INHIBIT ACTIVE: software_estop=True, '
-            'autonomy_enabled=False. Propulsion output is ZERO.'
+            'BOOT INHIBIT ACTIVE: '
+            'software_estop=True, autonomy_enabled=False.'
         )
 
-    def command_callback(self, msg: TwistStamped) -> None:
+    def command_callback(self, msg):
         self.last_command = msg
-        self.last_command_time = self.get_clock().now()
+        self.last_command_time = (
+            self.get_clock().now()
+        )
 
-    def state_callback(self, msg: State) -> None:
+    def state_callback(self, msg):
         self.vehicle_state = msg
 
-    def clear_stored_command(self) -> None:
-        """Prevent any previously received command from being reused."""
+        if (
+            self.hold_required
+            and msg.connected
+            and str(msg.mode).upper()
+                == self.stop_mode
+        ):
+            self.hold_required = False
+
+    def clear_stored_command(self):
         self.last_command = None
         self.last_command_time = None
 
-    def estop_callback(self, request, response):
+    def set_autonomy(self, enabled):
+        self.set_parameters([
+            Parameter(
+                'autonomy_enabled',
+                Parameter.Type.BOOL,
+                bool(enabled)
+            )
+        ])
+
+        if not enabled:
+            self.autonomy_enable_time = None
+
+    def hold_done(self, future, reason):
+        try:
+            result = future.result()
+
+            if (
+                result is None
+                or not result.mode_sent
+            ):
+                self.get_logger().error(
+                    f'{self.stop_mode} REQUEST FAILED: '
+                    f'{reason}'
+                )
+            else:
+                self.get_logger().warn(
+                    f'{self.stop_mode} REQUEST SENT: '
+                    f'{reason}'
+                )
+
+        except Exception as exc:
+            self.get_logger().error(
+                f'{self.stop_mode} REQUEST ERROR: '
+                f'{exc}'
+            )
+
+        finally:
+            self.hold_future = None
+
+    def request_hold(
+        self,
+        reason,
+        force=False
+    ):
+        state = self.vehicle_state
+
+        if (
+            state is None
+            or not state.connected
+        ):
+            return
+
+        mode = str(state.mode).upper()
+
+        if mode == self.stop_mode:
+            self.hold_required = False
+            return
+
+        # Never fight MANUAL/AUTO/RTL/etc.
+        # Bridge only owns the GUIDED -> HOLD transition.
+        if mode not in self.allowed_modes:
+            self.hold_required = False
+            return
+
+        if (
+            self.hold_future is not None
+            and not self.hold_future.done()
+        ):
+            return
+
+        now = time.monotonic()
+
+        if (
+            not force
+            and (
+                now
+                - self.last_hold_request_monotonic
+                < self.hold_retry_period
+            )
+        ):
+            return
+
+        self.last_hold_request_monotonic = now
+
+        if not self.mode_client.service_is_ready():
+            return
+
+        request = SetMode.Request()
+        request.base_mode = 0
+        request.custom_mode = self.stop_mode
+
+        self.hold_future = (
+            self.mode_client.call_async(request)
+        )
+
+        self.hold_future.add_done_callback(
+            lambda future: self.hold_done(
+                future,
+                reason
+            )
+        )
+
+    def trip_to_hold(self, reason):
+        self.set_autonomy(False)
+        self.clear_stored_command()
+
+        self.hold_required = True
+
+        if reason != self.last_stop_reason:
+            self.get_logger().error(
+                f'AUTONOMY STOP: {reason}; '
+                f'requesting {self.stop_mode}'
+            )
+
+            self.last_stop_reason = reason
+
+        self.request_hold(
+            reason,
+            force=True
+        )
+
+    def estop_callback(
+        self,
+        request,
+        response
+    ):
         active = bool(request.data)
 
-        # Any E-stop transition also disables autonomy.
-        #
-        # This is intentional:
-        # clearing an E-stop must NEVER automatically restore motion.
+        # Any software-stop transition revokes autonomy.
         self.set_parameters([
             Parameter(
                 'software_estop',
@@ -161,196 +360,284 @@ class MavrosCommandBridge(Node):
             ),
         ])
 
+        self.autonomy_enable_time = None
         self.clear_stored_command()
 
-        # Do not wait for the normal update timer.
-        self.publish_zero()
-
         if active:
-            response.success = True
-            response.message = (
-                'SOFTWARE STOP ENGAGED: zero output; autonomy disabled'
+            self.hold_required = True
+
+            self.request_hold(
+                'software stop engaged',
+                force=True
             )
 
-            self.get_logger().error(
-                'SOFTWARE STOP ENGAGED: AUTONOMY DISABLED'
+            response.success = True
+            response.message = (
+                'SOFTWARE STOP ENGAGED: '
+                'autonomy disabled; HOLD requested'
             )
 
         else:
             response.success = True
             response.message = (
-                'Software stop cleared. Autonomy remains DISABLED '
-                'and must be explicitly re-enabled.'
-            )
-
-            self.get_logger().warn(
                 'Software stop cleared. '
-                'AUTONOMY REMAINS DISABLED.'
+                'Autonomy remains DISABLED.'
             )
 
         return response
 
-    def autonomy_callback(self, request, response):
+    def autonomy_callback(
+        self,
+        request,
+        response
+    ):
         enable = bool(request.data)
 
-        # It must not be possible to arm the software autonomy gate
-        # underneath an active software stop.
-        if enable and bool(
-            self.get_parameter('software_estop').value
-        ):
-            self.set_parameters([
-                Parameter(
-                    'autonomy_enabled',
-                    Parameter.Type.BOOL,
-                    False
-                )
-            ])
-
+        if not enable:
+            self.set_autonomy(False)
             self.clear_stored_command()
-            self.publish_zero()
 
-            response.success = False
-            response.message = (
-                'Cannot enable autonomy while software stop is active'
+            self.hold_required = True
+
+            self.request_hold(
+                'autonomy disabled',
+                force=True
             )
 
-            self.get_logger().error(
-                'AUTONOMY ENABLE REJECTED: software stop is active'
+            response.success = True
+            response.message = (
+                'Autonomy disabled; HOLD requested'
             )
 
             return response
 
-        self.set_parameters([
-            Parameter(
-                'autonomy_enabled',
-                Parameter.Type.BOOL,
-                enable
-            )
-        ])
+        if bool(
+            self.get_parameter(
+                'software_estop'
+            ).value
+        ):
+            self.set_autonomy(False)
 
-        # Every enable/disable transition invalidates old commands.
+            response.success = False
+            response.message = (
+                'Cannot enable autonomy while '
+                'software stop is active'
+            )
+
+            return response
+
+        state = self.vehicle_state
+
+        if (
+            state is None
+            or not state.connected
+        ):
+            self.set_autonomy(False)
+
+            response.success = False
+            response.message = (
+                'Cannot enable autonomy: '
+                'MAVROS not connected'
+            )
+
+            return response
+
+        mode = str(state.mode).upper()
+
+        if mode not in self.allowed_modes:
+            self.set_autonomy(False)
+
+            response.success = False
+            response.message = (
+                'Cannot enable autonomy: '
+                f'vehicle mode {state.mode} '
+                'is not allowed'
+            )
+
+            return response
+
+        # IMPORTANT:
+        # Arming is deliberately NOT required here.
+        #
+        # We want the current autonomous setpoint streaming
+        # before the operator arms the vehicle.
         self.clear_stored_command()
-        self.publish_zero()
 
-        if enable:
-            response.success = True
+        self.set_autonomy(True)
+
+        self.autonomy_enable_time = (
+            self.get_clock().now()
+        )
+
+        self.hold_required = False
+        self.last_stop_reason = None
+
+        response.success = True
+
+        if state.armed:
             response.message = (
-                'Autonomy enabled; waiting for a fresh command and '
-                'all vehicle authorization conditions'
+                'Autonomy enabled and vehicle ARMED'
             )
-
-            self.get_logger().warn(
-                'AUTONOMY ENABLED: fresh command, connection, arm, '
-                'and allowed mode are still required'
-            )
-
         else:
-            response.success = True
             response.message = (
-                'Autonomy disabled: propulsion output forced to zero'
-            )
-
-            self.get_logger().warn(
-                'AUTONOMY DISABLED'
+                'Autonomy prepared while DISARMED; '
+                'waiting for fresh non-zero command'
             )
 
         return response
 
-    def authorized(self) -> bool:
-        if bool(self.get_parameter('software_estop').value):
-            return False
-
-        if not bool(
-            self.get_parameter('autonomy_enabled').value
-        ):
-            return False
-
-        if self.vehicle_state is None:
-            return False
-
-        if not self.vehicle_state.connected:
-            return False
-
-        if not self.vehicle_state.armed:
-            return False
-
-        if self.vehicle_state.mode not in self.allowed_modes:
-            return False
-
-        if self.last_command is None or self.last_command_time is None:
-            return False
-
-        age = (
-            self.get_clock().now() - self.last_command_time
-        ).nanoseconds / 1e9
-
-        return age <= self.deadman_timeout
-
-    def make_zero(self) -> TwistStamped:
-        out = TwistStamped()
-        out.header.stamp = self.get_clock().now().to_msg()
-        out.header.frame_id = 'base_link'
-
-        out.twist.linear.x = 0.0
-        out.twist.linear.y = 0.0
-        out.twist.linear.z = 0.0
-
-        out.twist.angular.x = 0.0
-        out.twist.angular.y = 0.0
-        out.twist.angular.z = 0.0
-
-        return out
-
-    def publish_zero(self) -> None:
-        self.cmd_pub.publish(self.make_zero())
-
-    def publish_zero_burst(self) -> None:
-        """Send repeated zero commands immediately before shutdown."""
-        self.clear_stored_command()
-
-        duration = max(
-            self.shutdown_zero_duration,
-            0.0
+    def command_is_zero(
+        self,
+        msg
+    ):
+        return (
+            abs(float(msg.twist.linear.x))
+                <= self.zero_command_epsilon
+            and
+            abs(float(msg.twist.angular.z))
+                <= self.zero_command_epsilon
         )
 
-        period = 1.0 / max(
-            self.publish_rate,
-            20.0
+    def command_is_finite(
+        self,
+        msg
+    ):
+        values = (
+            msg.twist.linear.x,
+            msg.twist.linear.y,
+            msg.twist.linear.z,
+            msg.twist.angular.x,
+            msg.twist.angular.y,
+            msg.twist.angular.z,
         )
 
-        self.get_logger().warn(
-            f'SHUTDOWN: publishing ZERO velocity for '
-            f'{duration:.2f} s'
+        return all(
+            math.isfinite(float(v))
+            for v in values
         )
 
-        end_time = time.monotonic() + duration
-
-        while time.monotonic() < end_time:
-            self.publish_zero()
-            time.sleep(period)
-
-        self.publish_zero()
-
-    def update(self) -> None:
-        if not self.authorized():
-            self.publish_zero()
+    def update(self):
+        if self.hold_required:
+            self.request_hold(
+                self.last_stop_reason
+                or 'stop latched'
+            )
             return
 
-        out = copy.deepcopy(self.last_command)
+        if bool(
+            self.get_parameter(
+                'software_estop'
+            ).value
+        ):
+            self.hold_required = True
+
+            self.request_hold(
+                'software stop active'
+            )
+            return
+
+        if not bool(
+            self.get_parameter(
+                'autonomy_enabled'
+            ).value
+        ):
+            return
+
+        state = self.vehicle_state
+
+        if (
+            state is None
+            or not state.connected
+        ):
+            self.trip_to_hold(
+                'MAVROS disconnected'
+            )
+            return
+
+        mode = str(state.mode).upper()
+
+        if mode not in self.allowed_modes:
+            self.trip_to_hold(
+                f'vehicle left allowed mode: '
+                f'{state.mode}'
+            )
+            return
+
+        # Note:
+        # NO armed check here.
+        #
+        # Streaming while disarmed is intentional so the
+        # CURRENT command is already flowing when ARM occurs.
+
+        if (
+            self.last_command is None
+            or self.last_command_time is None
+        ):
+            if self.autonomy_enable_time is not None:
+                since_enable = (
+                    self.get_clock().now()
+                    - self.autonomy_enable_time
+                ).nanoseconds / 1e9
+
+                if (
+                    since_enable
+                    <= self.initial_command_timeout
+                ):
+                    return
+
+            self.trip_to_hold(
+                'no fresh command after enable'
+            )
+            return
+
+        age = (
+            self.get_clock().now()
+            - self.last_command_time
+        ).nanoseconds / 1e9
+
+        if age > self.deadman_timeout:
+            self.trip_to_hold(
+                f'command stale ({age:.3f} s)'
+            )
+            return
+
+        if not self.command_is_finite(
+            self.last_command
+        ):
+            self.trip_to_hold(
+                'non-finite command'
+            )
+            return
+
+        if self.command_is_zero(
+            self.last_command
+        ):
+            self.trip_to_hold(
+                'controller requested STOP'
+            )
+            return
+
+        out = copy.deepcopy(
+            self.last_command
+        )
 
         out.header.stamp = (
             self.get_clock().now().to_msg()
         )
+
         out.header.frame_id = 'base_link'
 
         out.twist.linear.x = max(
             -self.max_forward_speed,
             min(
                 self.max_forward_speed,
-                float(out.twist.linear.x)
+                float(
+                    self.last_command.twist.linear.x
+                )
             )
         )
 
+        # We only intentionally command surge and yaw.
         out.twist.linear.y = 0.0
         out.twist.linear.z = 0.0
 
@@ -361,55 +648,68 @@ class MavrosCommandBridge(Node):
             -self.max_yaw_rate,
             min(
                 self.max_yaw_rate,
-                float(out.twist.angular.z)
+                float(
+                    self.last_command.twist.angular.z
+                )
             )
         )
 
         self.cmd_pub.publish(out)
 
+    def shutdown_to_hold(self):
+        self.set_autonomy(False)
+        self.clear_stored_command()
+        self.hold_required = True
+
+        state = self.vehicle_state
+
+        if (
+            state is None
+            or not state.connected
+            or str(state.mode).upper()
+                not in self.allowed_modes
+        ):
+            return
+
+        if not self.mode_client.wait_for_service(
+            timeout_sec=0.25
+        ):
+            return
+
+        request = SetMode.Request()
+        request.base_mode = 0
+        request.custom_mode = self.stop_mode
+
+        future = self.mode_client.call_async(
+            request
+        )
+
+        try:
+            rclpy.spin_until_future_complete(
+                self,
+                future,
+                timeout_sec=self.shutdown_hold_timeout
+            )
+        except Exception:
+            pass
+
 
 def main(args=None):
-    stop_requested = False
-
-    # Handle SIGINT/SIGTERM ourselves so the ROS context remains alive
-    # long enough to transmit the shutdown-zero burst.
-    rclpy.init(
-        args=args,
-        signal_handler_options=SignalHandlerOptions.NO
-    )
+    rclpy.init(args=args)
 
     node = MavrosCommandBridge()
 
-    def request_shutdown(signum, frame):
-        nonlocal stop_requested
-        stop_requested = True
-
-    signal.signal(
-        signal.SIGINT,
-        request_shutdown
-    )
-
-    signal.signal(
-        signal.SIGTERM,
-        request_shutdown
-    )
-
     try:
-        while rclpy.ok() and not stop_requested:
-            rclpy.spin_once(
-                node,
-                timeout_sec=0.10
-            )
+        rclpy.spin(node)
+
+    except KeyboardInterrupt:
+        pass
 
     finally:
         try:
-            node.publish_zero_burst()
-
-        except Exception as exc:
-            node.get_logger().error(
-                'Failed while publishing shutdown '
-                f'zero burst: {exc}'
-            )
+            node.shutdown_to_hold()
+        except Exception:
+            pass
 
         node.destroy_node()
 

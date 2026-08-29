@@ -8,9 +8,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import rclpy
 from geometry_msgs.msg import TwistStamped
-from mavros_msgs.msg import State
+from mavros_msgs.msg import State, SysStatus
+from mavros_msgs.srv import CommandBool, SetMode
 from rclpy.node import Node
-from std_srvs.srv import SetBool
+from std_srvs.srv import SetBool, Trigger
 
 from boat_interfaces.msg import DetectedObjectArray, Gate
 
@@ -19,7 +20,7 @@ PAGE = r"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
-    <title>RobotX Safe Gate Test</title>
+    <title>RobotX Gate Test Console</title>
 
     <style>
         body {
@@ -30,7 +31,7 @@ PAGE = r"""<!DOCTYPE html>
         }
 
         .page {
-            max-width: 1050px;
+            max-width: 1150px;
             margin: auto;
             padding: 24px;
         }
@@ -45,7 +46,8 @@ PAGE = r"""<!DOCTYPE html>
 
         .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            grid-template-columns:
+                repeat(auto-fit, minmax(270px, 1fr));
             gap: 16px;
         }
 
@@ -59,11 +61,13 @@ PAGE = r"""<!DOCTYPE html>
         .row {
             display: flex;
             justify-content: space-between;
+            gap: 16px;
             margin: 10px 0;
         }
 
         .value {
             font-weight: bold;
+            text-align: right;
         }
 
         .good {
@@ -80,13 +84,18 @@ PAGE = r"""<!DOCTYPE html>
 
         button {
             width: 100%;
-            min-height: 62px;
-            margin-top: 12px;
-            font-size: 18px;
+            min-height: 56px;
+            margin-top: 10px;
+            font-size: 17px;
             font-weight: bold;
             border: none;
             border-radius: 8px;
             cursor: pointer;
+        }
+
+        button:disabled {
+            background: #4b555b !important;
+            cursor: not-allowed;
         }
 
         #enableButton {
@@ -94,21 +103,49 @@ PAGE = r"""<!DOCTYPE html>
             color: white;
         }
 
-        #enableButton:disabled {
-            background: #4b555b;
-            cursor: not-allowed;
-        }
-
         #stopButton {
             background: #c62828;
             color: white;
-            font-size: 23px;
+            font-size: 22px;
+        }
+
+        #armButton {
+            background: #a76612;
+            color: white;
+        }
+
+        #disarmButton {
+            background: #455a64;
+            color: white;
+        }
+
+        #modeButton {
+            background: #315b8a;
+            color: white;
+        }
+
+        #resetButton {
+            background: #69528c;
+            color: white;
+        }
+
+        select {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 12px;
+            margin-top: 8px;
+            border-radius: 6px;
+            background: #101418;
+            color: white;
+            border: 1px solid #65717b;
+            font-size: 17px;
         }
 
         #message {
-            min-height: 28px;
+            min-height: 42px;
             margin-top: 16px;
             font-family: monospace;
+            white-space: pre-wrap;
         }
 
         .small {
@@ -121,14 +158,16 @@ PAGE = r"""<!DOCTYPE html>
 <body>
 <div class="page">
 
-    <h1>RobotX Safe Gate Test</h1>
+    <h1>RobotX Gate Test Console</h1>
+
     <div class="small">
-        Simplified single-gate autonomy controller
+        LiDAR, perception, gate follower, MAVROS,
+        command bridge and dashboard remain running continuously.
     </div>
 
     <div class="warning">
         SOFTWARE STOP IS NOT THE PHYSICAL MOTOR E-STOP.
-        The physical E-stop must independently remove motor power.
+        Keep the physical E-stop accessible whenever the vehicle is armed.
     </div>
 
     <div class="grid">
@@ -153,6 +192,34 @@ PAGE = r"""<!DOCTYPE html>
         </div>
 
         <div class="card">
+            <h2>Battery</h2>
+
+            <div class="row">
+                <span>Voltage</span>
+                <span id="batteryVoltage"
+                      class="value">---</span>
+            </div>
+
+            <div class="row">
+                <span>Current</span>
+                <span id="batteryCurrent"
+                      class="value">---</span>
+            </div>
+
+            <div class="row">
+                <span>Remaining</span>
+                <span id="batteryRemaining"
+                      class="value">---</span>
+            </div>
+
+            <div class="row">
+                <span>Telemetry</span>
+                <span id="batteryState"
+                      class="value">---</span>
+            </div>
+        </div>
+
+        <div class="card">
             <h2>Perception</h2>
 
             <div class="row">
@@ -167,7 +234,8 @@ PAGE = r"""<!DOCTYPE html>
 
             <div class="row">
                 <span>Confidence</span>
-                <span id="confidence" class="value">---</span>
+                <span id="confidence"
+                      class="value">---</span>
             </div>
 
             <div class="row">
@@ -186,12 +254,20 @@ PAGE = r"""<!DOCTYPE html>
 
             <div class="row">
                 <span>Forward</span>
-                <span id="controlX" class="value">0.000 m/s</span>
+                <span id="controlX"
+                      class="value">0.000 m/s</span>
             </div>
 
             <div class="row">
                 <span>Yaw</span>
-                <span id="controlYaw" class="value">0.000 rad/s</span>
+                <span id="controlYaw"
+                      class="value">0.000 rad/s</span>
+            </div>
+
+            <div class="row">
+                <span>Command Ready</span>
+                <span id="commandReady"
+                      class="value">---</span>
             </div>
         </div>
 
@@ -200,40 +276,84 @@ PAGE = r"""<!DOCTYPE html>
 
             <div class="row">
                 <span>Forward</span>
-                <span id="bridgeX" class="value">0.000 m/s</span>
+                <span id="bridgeX"
+                      class="value">0.000 m/s</span>
             </div>
 
             <div class="row">
                 <span>Yaw</span>
-                <span id="bridgeYaw" class="value">0.000 rad/s</span>
+                <span id="bridgeYaw"
+                      class="value">0.000 rad/s</span>
+            </div>
+
+            <div class="row">
+                <span>Velocity Output</span>
+                <span id="bridgeActive"
+                      class="value">---</span>
             </div>
 
             <div class="row">
                 <span>Control State</span>
-                <span id="controlState" class="value">BOOT SAFE</span>
+                <span id="controlState"
+                      class="value">BOOT SAFE</span>
             </div>
         </div>
 
     </div>
 
-    <div class="card" style="margin-top:16px;">
-        <h2>Autonomy Control</h2>
+    <div class="grid" style="margin-top:16px;">
 
-        <button
-            id="enableButton"
-            onclick="enableAutonomy()"
-            disabled>
-            ENABLE AUTONOMY
-        </button>
+        <div class="card">
+            <h2>Vehicle Control</h2>
 
-        <button
-            id="stopButton"
-            onclick="softwareStop()">
-            SOFTWARE STOP
-        </button>
+            <button id="armButton"
+                    onclick="armVehicle()">
+                ARM
+            </button>
 
-        <div id="message"></div>
+            <button id="disarmButton"
+                    onclick="disarmVehicle()">
+                DISARM
+            </button>
+
+            <select id="modeSelect">
+                <option value="MANUAL">MANUAL</option>
+                <option value="HOLD">HOLD</option>
+                <option value="GUIDED">GUIDED</option>
+                <option value="LOITER">LOITER</option>
+                <option value="AUTO">AUTO</option>
+                <option value="RTL">RTL</option>
+            </select>
+
+            <button id="modeButton"
+                    onclick="changeMode()">
+                SET MODE
+            </button>
+        </div>
+
+        <div class="card">
+            <h2>Mission Control</h2>
+
+            <button id="resetButton"
+                    onclick="resetMission()">
+                RESET MISSION
+            </button>
+
+            <button id="enableButton"
+                    onclick="enableAutonomy()"
+                    disabled>
+                ENABLE AUTONOMY
+            </button>
+
+            <button id="stopButton"
+                    onclick="softwareStop()">
+                SOFTWARE STOP
+            </button>
+        </div>
+
     </div>
+
+    <div id="message"></div>
 
 </div>
 
@@ -255,6 +375,11 @@ function setState(id, text, state) {
 }
 
 
+function finiteNumber(v) {
+    return typeof v === "number" && Number.isFinite(v);
+}
+
+
 async function refreshStatus() {
     try {
         const response = await fetch(
@@ -273,17 +398,74 @@ async function refreshStatus() {
         setState(
             "armed",
             s.armed ? "ARMED" : "DISARMED",
-            s.armed
+            !s.armed
         );
 
         setState(
             "mode",
             s.mode || "---",
             s.mode === "GUIDED"
+                ? true
+                : s.mode === "HOLD"
+                    ? null
+                    : null
         );
 
-        document.getElementById("buoys").textContent =
-            s.buoy_count;
+        const selector =
+            document.getElementById("modeSelect");
+
+        if (
+            document.activeElement !== selector
+            && Array.from(selector.options)
+                .some(o => o.value === s.mode)
+        ) {
+            selector.value = s.mode;
+        }
+
+        if (finiteNumber(s.battery_voltage)) {
+            document.getElementById(
+                "batteryVoltage"
+            ).textContent =
+                s.battery_voltage.toFixed(2) + " V";
+        } else {
+            document.getElementById(
+                "batteryVoltage"
+            ).textContent = "---";
+        }
+
+        if (finiteNumber(s.battery_current)) {
+            document.getElementById(
+                "batteryCurrent"
+            ).textContent =
+                s.battery_current.toFixed(2) + " A";
+        } else {
+            document.getElementById(
+                "batteryCurrent"
+            ).textContent = "---";
+        }
+
+        if (finiteNumber(s.battery_remaining)) {
+            document.getElementById(
+                "batteryRemaining"
+            ).textContent =
+                Math.round(s.battery_remaining) + " %";
+        } else {
+            document.getElementById(
+                "batteryRemaining"
+            ).textContent = "---";
+        }
+
+        setState(
+            "batteryState",
+            s.battery_fresh
+                ? "RECEIVING"
+                : "UNAVAILABLE",
+            s.battery_fresh
+        );
+
+        document.getElementById(
+            "buoys"
+        ).textContent = s.buoy_count;
 
         setState(
             "gate",
@@ -291,33 +473,78 @@ async function refreshStatus() {
             s.gate_fresh
         );
 
-        document.getElementById("confidence").textContent =
-            s.gate_confidence.toFixed(3);
+        if (s.gate_fresh) {
+            document.getElementById(
+                "confidence"
+            ).textContent =
+                s.gate_confidence.toFixed(3);
 
-        document.getElementById("gateX").textContent =
-            s.gate_x.toFixed(2) + " m";
+            document.getElementById(
+                "gateX"
+            ).textContent =
+                s.gate_x.toFixed(2) + " m";
 
-        document.getElementById("gateY").textContent =
-            s.gate_y.toFixed(2) + " m";
+            document.getElementById(
+                "gateY"
+            ).textContent =
+                s.gate_y.toFixed(2) + " m";
+        } else {
+            document.getElementById(
+                "confidence"
+            ).textContent = "---";
 
-        document.getElementById("controlX").textContent =
+            document.getElementById(
+                "gateX"
+            ).textContent = "---";
+
+            document.getElementById(
+                "gateY"
+            ).textContent = "---";
+        }
+
+        document.getElementById(
+            "controlX"
+        ).textContent =
             s.control_forward.toFixed(3) + " m/s";
 
-        document.getElementById("controlYaw").textContent =
+        document.getElementById(
+            "controlYaw"
+        ).textContent =
             s.control_yaw.toFixed(3) + " rad/s";
 
-        document.getElementById("bridgeX").textContent =
+        setState(
+            "commandReady",
+            s.control_ready ? "READY" : "STOP",
+            s.control_ready
+        );
+
+        document.getElementById(
+            "bridgeX"
+        ).textContent =
             s.bridge_forward.toFixed(3) + " m/s";
 
-        document.getElementById("bridgeYaw").textContent =
+        document.getElementById(
+            "bridgeYaw"
+        ).textContent =
             s.bridge_yaw.toFixed(3) + " rad/s";
+
+        setState(
+            "bridgeActive",
+            s.bridge_command_active
+                ? "ACTIVE"
+                : "INACTIVE",
+            s.bridge_command_active
+                ? true
+                : null
+        );
 
         setState(
             "controlState",
             s.control_state,
             s.control_state === "ENABLED"
                 ? true
-                : s.control_state === "STOPPED"
+                : s.control_state.includes("STOP")
+                    || s.control_state.includes("HOLD")
                     ? false
                     : null
         );
@@ -327,7 +554,9 @@ async function refreshStatus() {
         ).disabled = !s.can_enable;
 
     } catch (err) {
-        document.getElementById("message").textContent =
+        document.getElementById(
+            "message"
+        ).textContent =
             "Dashboard connection error: " + err;
     }
 }
@@ -344,15 +573,72 @@ async function postAction(path) {
 
     const result = await response.json();
 
-    document.getElementById("message").textContent =
-        result.message;
+    document.getElementById(
+        "message"
+    ).textContent = result.message;
 
     await refreshStatus();
+
+    return result;
+}
+
+
+async function armVehicle() {
+    if (!confirm(
+        "ARM vehicle? Keep the physical E-stop accessible."
+    )) {
+        return;
+    }
+
+    document.getElementById(
+        "message"
+    ).textContent = "Requesting ARM...";
+
+    await postAction("/api/arm");
+}
+
+
+async function disarmVehicle() {
+    document.getElementById(
+        "message"
+    ).textContent =
+        "Stopping autonomy and DISARMING...";
+
+    await postAction("/api/disarm");
+}
+
+
+async function changeMode() {
+    const mode =
+        document.getElementById(
+            "modeSelect"
+        ).value;
+
+    document.getElementById(
+        "message"
+    ).textContent =
+        "Requesting mode " + mode + "...";
+
+    await postAction(
+        "/api/mode/" + encodeURIComponent(mode)
+    );
+}
+
+
+async function resetMission() {
+    document.getElementById(
+        "message"
+    ).textContent =
+        "Stopping propulsion and resetting mission...";
+
+    await postAction("/api/reset_mission");
 }
 
 
 async function enableAutonomy() {
-    document.getElementById("message").textContent =
+    document.getElementById(
+        "message"
+    ).textContent =
         "Requesting autonomy enable...";
 
     await postAction("/api/enable");
@@ -360,7 +646,9 @@ async function enableAutonomy() {
 
 
 async function softwareStop() {
-    document.getElementById("message").textContent =
+    document.getElementById(
+        "message"
+    ).textContent =
         "Sending SOFTWARE STOP...";
 
     await postAction("/api/stop");
@@ -378,6 +666,15 @@ refreshStatus();
 
 
 class DashboardNode(Node):
+
+    VALID_MODES = {
+        'MANUAL',
+        'HOLD',
+        'GUIDED',
+        'LOITER',
+        'AUTO',
+        'RTL',
+    }
 
     def __init__(self):
         super().__init__('boat_dashboard')
@@ -417,14 +714,28 @@ class DashboardNode(Node):
         self.bridge_yaw = 0.0
         self.last_bridge_time = None
 
+        self.battery_voltage = None
+        self.battery_current = None
+        self.battery_remaining = None
+        self.last_battery_time = None
+
         self.control_state = 'BOOT SAFE'
 
-        self.action_lock = threading.Lock()
+        # HTTP handlers may call functions that call other
+        # dashboard functions, so use a re-entrant lock.
+        self.action_lock = threading.RLock()
 
         self.create_subscription(
             State,
             '/mavros/state',
             self.state_callback,
+            10
+        )
+
+        self.create_subscription(
+            SysStatus,
+            '/mavros/sys_status',
+            self.sys_status_callback,
             10
         )
 
@@ -466,9 +777,19 @@ class DashboardNode(Node):
             '/vehicle/set_autonomy'
         )
 
-        self.follower_client = self.create_client(
-            SetBool,
-            '/control/set_enabled'
+        self.arm_client = self.create_client(
+            CommandBool,
+            '/mavros/cmd/arming'
+        )
+
+        self.mode_client = self.create_client(
+            SetMode,
+            '/mavros/set_mode'
+        )
+
+        self.reset_client = self.create_client(
+            Trigger,
+            '/control/reset_mission'
         )
 
         handler = self.make_handler()
@@ -493,12 +814,65 @@ class DashboardNode(Node):
     def state_callback(self, msg):
         self.vehicle_state = msg
 
+        if (
+            bool(msg.armed)
+            and str(msg.mode).upper() == 'GUIDED'
+            and self.control_state
+                == 'AUTONOMY READY / DISARMED'
+        ):
+            self.control_state = 'ENABLED'
+
+    def sys_status_callback(self, msg):
+        voltage_raw = int(
+            msg.voltage_battery
+        )
+
+        current_raw = int(
+            msg.current_battery
+        )
+
+        remaining_raw = int(
+            msg.battery_remaining
+        )
+
+        if (
+            voltage_raw <= 0
+            or voltage_raw == 65535
+        ):
+            self.battery_voltage = None
+        else:
+            # MAVLink SYS_STATUS uses millivolts.
+            self.battery_voltage = (
+                voltage_raw / 1000.0
+            )
+
+        if current_raw < 0:
+            self.battery_current = None
+        else:
+            # MAVLink SYS_STATUS current is in centiamps.
+            self.battery_current = (
+                current_raw / 100.0
+            )
+
+        if remaining_raw < 0:
+            self.battery_remaining = None
+        else:
+            self.battery_remaining = float(
+                remaining_raw
+            )
+
+        self.last_battery_time = (
+            time.monotonic()
+        )
+
     def objects_callback(self, msg):
         self.buoy_count = len(msg.objects)
 
     def gate_callback(self, msg):
         self.last_gate = msg
-        self.last_gate_time = time.monotonic()
+        self.last_gate_time = (
+            time.monotonic()
+        )
 
     def control_callback(self, msg):
         self.control_forward = float(
@@ -518,7 +892,9 @@ class DashboardNode(Node):
             msg.twist.angular.z
         )
 
-        self.last_bridge_time = time.monotonic()
+        self.last_bridge_time = (
+            time.monotonic()
+        )
 
     def gate_is_fresh(self):
         if (
@@ -551,14 +927,15 @@ class DashboardNode(Node):
             math.isfinite(confidence)
             and math.isfinite(x)
             and math.isfinite(y)
-            and confidence >= self.min_gate_confidence
+            and confidence
+                >= self.min_gate_confidence
             and x > 0.0
         )
 
-    def bridge_is_zero(self):
+    def control_is_ready(self):
         return (
-            abs(self.bridge_forward) <= 0.01
-            and abs(self.bridge_yaw) <= 0.01
+            abs(self.control_forward) > 0.0001
+            or abs(self.control_yaw) > 0.0001
         )
 
     def get_status(self):
@@ -598,28 +975,100 @@ class DashboardNode(Node):
                 self.last_gate.center.y
             )
 
-        bridge_alive = False
+        bridge_alive = (
+            self.estop_client.service_is_ready()
+            and
+            self.autonomy_client.service_is_ready()
+        )
+
+        bridge_command_active = False
 
         if self.last_bridge_time is not None:
-            bridge_alive = (
+            bridge_command_active = (
                 time.monotonic()
                 - self.last_bridge_time
             ) <= 0.50
 
+        # Do not show an old non-zero command after the bridge
+        # has stopped publishing and Rover has transitioned to HOLD.
+        bridge_forward = (
+            self.bridge_forward
+            if bridge_command_active
+            else 0.0
+        )
+
+        bridge_yaw = (
+            self.bridge_yaw
+            if bridge_command_active
+            else 0.0
+        )
+
+        battery_fresh = False
+
+        if self.last_battery_time is not None:
+            battery_fresh = (
+                time.monotonic()
+                - self.last_battery_time
+            ) <= 3.0
+
+        battery_voltage = (
+            self.battery_voltage
+            if battery_fresh
+            else None
+        )
+
+        battery_current = (
+            self.battery_current
+            if battery_fresh
+            else None
+        )
+
+        battery_remaining = (
+            self.battery_remaining
+            if battery_fresh
+            else None
+        )
+
+        control_ready = (
+            self.control_is_ready()
+        )
+
         can_enable = (
             connected
-            and armed
-            and mode == 'GUIDED'
             and gate_fresh
+            and control_ready
             and bridge_alive
-            and self.bridge_is_zero()
-            and self.control_state != 'ENABLED'
+            and self.control_state not in (
+                'ENABLED',
+                'AUTONOMY READY / DISARMED',
+            )
         )
+
+        display_state = (
+            self.control_state
+        )
+
+        if (
+            mode == 'HOLD'
+            and self.control_state == 'ENABLED'
+        ):
+            display_state = 'HOLD / STOPPED'
+
+        if (
+            not armed
+            and self.control_state == 'ENABLED'
+        ):
+            display_state = 'DISARMED'
 
         return {
             'connected': connected,
             'armed': armed,
             'mode': mode,
+
+            'battery_fresh': battery_fresh,
+            'battery_voltage': battery_voltage,
+            'battery_current': battery_current,
+            'battery_remaining': battery_remaining,
 
             'buoy_count': self.buoy_count,
 
@@ -628,18 +1077,45 @@ class DashboardNode(Node):
             'gate_x': gate_x,
             'gate_y': gate_y,
 
-            'control_forward': self.control_forward,
-            'control_yaw': self.control_yaw,
+            'control_forward':
+                self.control_forward,
+            'control_yaw':
+                self.control_yaw,
+            'control_ready':
+                control_ready,
 
-            'bridge_forward': self.bridge_forward,
-            'bridge_yaw': self.bridge_yaw,
+            'bridge_forward':
+                bridge_forward,
+            'bridge_yaw':
+                bridge_yaw,
+            'bridge_command_active':
+                bridge_command_active,
+            'bridge_alive':
+                bridge_alive,
 
-            'bridge_alive': bridge_alive,
+            'control_state':
+                display_state,
 
-            'control_state': self.control_state,
-
-            'can_enable': can_enable,
+            'can_enable':
+                can_enable,
         }
+
+    def wait_future(
+        self,
+        future,
+        timeout=2.0
+    ):
+        deadline = (
+            time.monotonic() + timeout
+        )
+
+        while (
+            not future.done()
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.02)
+
+        return future.done()
 
     def call_bool_service(
         self,
@@ -658,17 +1134,14 @@ class DashboardNode(Node):
         request = SetBool.Request()
         request.data = bool(value)
 
-        future = client.call_async(request)
+        future = client.call_async(
+            request
+        )
 
-        deadline = time.monotonic() + timeout
-
-        while (
-            not future.done()
-            and time.monotonic() < deadline
+        if not self.wait_future(
+            future,
+            timeout
         ):
-            time.sleep(0.02)
-
-        if not future.done():
             return (
                 False,
                 'ROS service call timed out'
@@ -694,9 +1167,166 @@ class DashboardNode(Node):
             str(response.message)
         )
 
+    def call_arm_service(
+        self,
+        arm,
+        timeout=3.0
+    ):
+        if not self.arm_client.wait_for_service(
+            timeout_sec=0.50
+        ):
+            return (
+                False,
+                'MAVROS arming service unavailable'
+            )
+
+        request = CommandBool.Request()
+        request.value = bool(arm)
+
+        future = self.arm_client.call_async(
+            request
+        )
+
+        if not self.wait_future(
+            future,
+            timeout
+        ):
+            return (
+                False,
+                'Arming service timed out'
+            )
+
+        try:
+            response = future.result()
+
+        except Exception as exc:
+            return (
+                False,
+                f'Arming exception: {exc}'
+            )
+
+        if response is None:
+            return (
+                False,
+                'Arming service returned no response'
+            )
+
+        if not response.success:
+            return (
+                False,
+                f'Arming rejected; MAV_RESULT={response.result}'
+            )
+
+        return (
+            True,
+            'ARMED' if arm else 'DISARMED'
+        )
+
+    def call_mode_service(
+        self,
+        mode,
+        timeout=3.0
+    ):
+        if not self.mode_client.wait_for_service(
+            timeout_sec=0.50
+        ):
+            return (
+                False,
+                'MAVROS mode service unavailable'
+            )
+
+        request = SetMode.Request()
+        request.base_mode = 0
+        request.custom_mode = str(mode)
+
+        future = self.mode_client.call_async(
+            request
+        )
+
+        if not self.wait_future(
+            future,
+            timeout
+        ):
+            return (
+                False,
+                'Mode service timed out'
+            )
+
+        try:
+            response = future.result()
+
+        except Exception as exc:
+            return (
+                False,
+                f'Mode exception: {exc}'
+            )
+
+        if response is None:
+            return (
+                False,
+                'Mode service returned no response'
+            )
+
+        if not response.mode_sent:
+            return (
+                False,
+                f'Mode {mode} rejected'
+            )
+
+        return (
+            True,
+            f'Mode request sent: {mode}'
+        )
+
+    def call_reset_service(
+        self,
+        timeout=2.0
+    ):
+        if not self.reset_client.wait_for_service(
+            timeout_sec=0.50
+        ):
+            return (
+                False,
+                'Mission reset service unavailable'
+            )
+
+        request = Trigger.Request()
+
+        future = self.reset_client.call_async(
+            request
+        )
+
+        if not self.wait_future(
+            future,
+            timeout
+        ):
+            return (
+                False,
+                'Mission reset timed out'
+            )
+
+        try:
+            response = future.result()
+
+        except Exception as exc:
+            return (
+                False,
+                f'Mission reset exception: {exc}'
+            )
+
+        if response is None:
+            return (
+                False,
+                'Mission reset returned no response'
+            )
+
+        return (
+            bool(response.success),
+            str(response.message)
+        )
+
     def execute_stop(self):
         with self.action_lock:
-
             messages = []
             success = True
 
@@ -724,22 +1354,12 @@ class DashboardNode(Node):
             if not ok:
                 success = False
 
-            ok, msg = self.call_bool_service(
-                self.follower_client,
-                False
-            )
-
-            messages.append(
-                'follower: ' + msg
-            )
-
-            if not ok:
-                success = False
-
             if success:
-                self.control_state = 'STOPPED'
+                self.control_state = 'STOPPED / HOLD'
             else:
-                self.control_state = 'STOP COMMAND FAILED'
+                self.control_state = (
+                    'STOP COMMAND FAILED'
+                )
 
             return (
                 success,
@@ -748,7 +1368,6 @@ class DashboardNode(Node):
 
     def execute_enable(self):
         with self.action_lock:
-
             status = self.get_status()
 
             if not status['connected']:
@@ -757,38 +1376,88 @@ class DashboardNode(Node):
                     'Enable rejected: MAVROS is not connected'
                 )
 
-            if not status['armed']:
-                return (
-                    False,
-                    'Enable rejected: vehicle is not armed'
-                )
-
-            if status['mode'] != 'GUIDED':
-                return (
-                    False,
-                    'Enable rejected: vehicle is not in GUIDED'
-                )
-
             if not status['gate_fresh']:
                 return (
                     False,
                     'Enable rejected: no fresh high-confidence gate'
                 )
 
+            if not status['control_ready']:
+                return (
+                    False,
+                    'Enable rejected: follower is commanding STOP. '
+                    'Move back before the gate and RESET MISSION.'
+                )
+
             if not status['bridge_alive']:
                 return (
                     False,
-                    'Enable rejected: bridge output is not alive'
-                )
-
-            if not self.bridge_is_zero():
-                return (
-                    False,
-                    'Enable rejected: bridge output is not zero'
+                    'Enable rejected: bridge control services unavailable'
                 )
 
             messages = []
 
+            # First establish the known safe state.
+            ok, msg = self.call_bool_service(
+                self.estop_client,
+                True
+            )
+
+            messages.append(
+                'safety: ' + msg
+            )
+
+            if not ok:
+                return (
+                    False,
+                    ' | '.join(messages)
+                )
+
+            # Never transition an armed Rover into GUIDED.
+            # If it is armed, disarm it first.
+            status = self.get_status()
+
+            if status['armed']:
+                ok, msg = self.call_arm_service(
+                    False
+                )
+
+                messages.append(
+                    'disarm: ' + msg
+                )
+
+                if not ok:
+                    return (
+                        False,
+                        ' | '.join(messages)
+                    )
+
+                deadline = time.monotonic() + 1.5
+
+                while time.monotonic() < deadline:
+                    state = self.vehicle_state
+
+                    if (
+                        state is not None
+                        and not bool(state.armed)
+                    ):
+                        break
+
+                    time.sleep(0.02)
+
+                state = self.vehicle_state
+
+                if (
+                    state is None
+                    or bool(state.armed)
+                ):
+                    return (
+                        False,
+                        'Enable aborted: vehicle did not confirm DISARM'
+                    )
+
+            # Clear software stop while still DISARMED.
+            # Clearing it does NOT enable autonomy.
             ok, msg = self.call_bool_service(
                 self.estop_client,
                 False
@@ -799,28 +1468,74 @@ class DashboardNode(Node):
             )
 
             if not ok:
-                self.control_state = 'STOPPED'
+                self.execute_fail_safe_stop()
+
                 return (
                     False,
                     ' | '.join(messages)
                 )
 
-            ok, msg = self.call_bool_service(
-                self.follower_client,
-                True
+            # Enter GUIDED while DISARMED, so no motor output is possible.
+            ok, msg = self.call_mode_service(
+                'GUIDED'
             )
 
             messages.append(
-                'follower: ' + msg
+                'mode: ' + msg
             )
 
             if not ok:
                 self.execute_fail_safe_stop()
+
                 return (
                     False,
                     ' | '.join(messages)
                 )
 
+            deadline = time.monotonic() + 1.5
+
+            while time.monotonic() < deadline:
+                state = self.vehicle_state
+
+                if (
+                    state is not None
+                    and str(state.mode).upper()
+                        == 'GUIDED'
+                ):
+                    break
+
+                time.sleep(0.02)
+
+            state = self.vehicle_state
+
+            if (
+                state is None
+                or str(state.mode).upper()
+                    != 'GUIDED'
+            ):
+                self.execute_fail_safe_stop()
+
+                return (
+                    False,
+                    'Enable aborted: GUIDED was not confirmed'
+                )
+
+            if bool(state.armed):
+                self.execute_fail_safe_stop()
+
+                return (
+                    False,
+                    'Enable aborted: vehicle unexpectedly armed '
+                    'during GUIDED preparation'
+                )
+
+            # Record bridge timestamp so we require a NEW output,
+            # not a stale dashboard value.
+            previous_bridge_time = (
+                self.last_bridge_time
+            )
+
+            # Bridge can now be enabled while DISARMED.
             ok, msg = self.call_bool_service(
                 self.autonomy_client,
                 True
@@ -832,20 +1547,68 @@ class DashboardNode(Node):
 
             if not ok:
                 self.execute_fail_safe_stop()
+
                 return (
                     False,
                     ' | '.join(messages)
                 )
 
-            self.control_state = 'ENABLED'
+            # Require at least one fresh bridge command before ARM
+            # is permitted.
+            deadline = time.monotonic() + 1.25
+            fresh_bridge = False
+
+            while time.monotonic() < deadline:
+                current = self.last_bridge_time
+
+                if (
+                    current is not None
+                    and (
+                        previous_bridge_time is None
+                        or current > previous_bridge_time
+                    )
+                ):
+                    fresh_bridge = True
+                    break
+
+                time.sleep(0.02)
+
+            if not fresh_bridge:
+                self.execute_fail_safe_stop()
+
+                return (
+                    False,
+                    'Enable aborted: bridge did not produce a '
+                    'fresh autonomous setpoint'
+                )
+
+            state = self.vehicle_state
+
+            if (
+                state is None
+                or bool(state.armed)
+                or str(state.mode).upper() != 'GUIDED'
+            ):
+                self.execute_fail_safe_stop()
+
+                return (
+                    False,
+                    'Enable aborted: vehicle state changed '
+                    'during preparation'
+                )
+
+            self.control_state = (
+                'AUTONOMY READY / DISARMED'
+            )
 
             return (
                 True,
-                ' | '.join(messages)
+                'Autonomy READY: GUIDED entered while DISARMED '
+                'and fresh autonomous setpoints are streaming. '
+                'Press ARM to start propulsion.'
             )
 
     def execute_fail_safe_stop(self):
-
         self.call_bool_service(
             self.estop_client,
             True
@@ -856,17 +1619,150 @@ class DashboardNode(Node):
             False
         )
 
-        self.call_bool_service(
-            self.follower_client,
-            False
+        self.control_state = (
+            'STOPPED / HOLD'
         )
 
-        self.control_state = 'STOPPED'
+    def execute_arm(self):
+        with self.action_lock:
+            status = self.get_status()
+
+            if not status['connected']:
+                return (
+                    False,
+                    'ARM rejected: MAVROS is not connected'
+                )
+
+            if status['mode'] == 'GUIDED':
+                if (
+                    self.control_state
+                        != 'AUTONOMY READY / DISARMED'
+                    or not status['bridge_command_active']
+                ):
+                    return (
+                        False,
+                        'ARM rejected: GUIDED requires '
+                        'ENABLE AUTONOMY first so a fresh '
+                        'setpoint is streaming before arming'
+                    )
+
+            ok, msg = self.call_arm_service(
+                True
+            )
+
+            if ok and status['mode'] == 'GUIDED':
+                self.control_state = 'ENABLED'
+
+            return (
+                ok,
+                msg
+            )
+
+    def execute_disarm(self):
+        with self.action_lock:
+            stop_ok, stop_msg = (
+                self.execute_stop()
+            )
+
+            arm_ok, arm_msg = (
+                self.call_arm_service(
+                    False
+                )
+            )
+
+            self.control_state = (
+                'DISARMED'
+                if arm_ok
+                else 'DISARM FAILED'
+            )
+
+            return (
+                stop_ok and arm_ok,
+                stop_msg
+                + ' | disarm: '
+                + arm_msg
+            )
+
+    def execute_mode(self, mode):
+        with self.action_lock:
+            mode = str(mode).upper()
+
+            if mode not in self.VALID_MODES:
+                return (
+                    False,
+                    f'Unsupported mode: {mode}'
+                )
+
+            if mode == 'GUIDED':
+                return (
+                    False,
+                    'Direct GUIDED selection is disabled. '
+                    'Use ENABLE AUTONOMY; it enters GUIDED '
+                    'while DISARMED and establishes a fresh '
+                    'setpoint before ARM.'
+                )
+
+            status = self.get_status()
+
+            if not status['connected']:
+                return (
+                    False,
+                    'Mode change rejected: MAVROS is not connected'
+                )
+
+            # Any non-GUIDED mode revokes autonomy first.
+            stop_ok, stop_msg = self.execute_stop()
+
+            if not stop_ok:
+                return (
+                    False,
+                    'Safety stop failed: ' + stop_msg
+                )
+
+            ok, msg = self.call_mode_service(
+                mode
+            )
+
+            if ok:
+                self.control_state = (
+                    mode + ' / AUTONOMY OFF'
+                )
+
+            return (
+                ok,
+                stop_msg + ' | mode: ' + msg
+            )
+
+    def execute_reset_mission(self):
+        with self.action_lock:
+            # Reset never starts motion. Revoke propulsion
+            # authority first, then reset the mission latch.
+            stop_ok, stop_msg = (
+                self.execute_stop()
+            )
+
+            reset_ok, reset_msg = (
+                self.call_reset_service()
+            )
+
+            if reset_ok:
+                self.control_state = (
+                    'MISSION RESET / STOPPED'
+                )
+
+            return (
+                stop_ok and reset_ok,
+                stop_msg
+                + ' | reset: '
+                + reset_msg
+            )
 
     def make_handler(self):
         node = self
 
-        class Handler(BaseHTTPRequestHandler):
+        class Handler(
+            BaseHTTPRequestHandler
+        ):
 
             def send_json(
                 self,
@@ -899,9 +1795,10 @@ class DashboardNode(Node):
                 self.wfile.write(data)
 
             def do_GET(self):
-
                 if self.path == '/':
-                    data = PAGE.encode('utf-8')
+                    data = PAGE.encode(
+                        'utf-8'
+                    )
 
                     self.send_response(200)
 
@@ -940,40 +1837,62 @@ class DashboardNode(Node):
                 )
 
             def do_POST(self):
-
                 if self.path == '/api/stop':
-
                     success, message = (
                         node.execute_stop()
                     )
 
-                    self.send_json({
-                        'success': success,
-                        'message': message
-                    })
-
-                    return
-
-                if self.path == '/api/enable':
-
+                elif self.path == '/api/enable':
                     success, message = (
                         node.execute_enable()
                     )
 
-                    self.send_json({
-                        'success': success,
-                        'message': message
-                    })
+                elif self.path == '/api/arm':
+                    success, message = (
+                        node.execute_arm()
+                    )
 
+                elif self.path == '/api/disarm':
+                    success, message = (
+                        node.execute_disarm()
+                    )
+
+                elif (
+                    self.path
+                    == '/api/reset_mission'
+                ):
+                    success, message = (
+                        node.execute_reset_mission()
+                    )
+
+                elif self.path.startswith(
+                    '/api/mode/'
+                ):
+                    mode = (
+                        self.path
+                        .split('/api/mode/', 1)[1]
+                        .strip()
+                        .upper()
+                    )
+
+                    success, message = (
+                        node.execute_mode(mode)
+                    )
+
+                else:
+                    self.send_json(
+                        {
+                            'success': False,
+                            'message': 'Not found'
+                        },
+                        status=404
+                    )
                     return
 
-                self.send_json(
-                    {
-                        'success': False,
-                        'message': 'Not found'
-                    },
-                    status=404
-                )
+                self.send_json({
+                    'success': success,
+                    'message': message
+                })
 
             def log_message(
                 self,
@@ -985,7 +1904,6 @@ class DashboardNode(Node):
         return Handler
 
     def destroy_node(self):
-
         try:
             self.http_server.shutdown()
             self.http_server.server_close()
@@ -997,7 +1915,6 @@ class DashboardNode(Node):
 
 
 def main(args=None):
-
     rclpy.init(args=args)
 
     node = DashboardNode()
