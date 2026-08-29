@@ -1,4 +1,4 @@
-from setuptools import find_packages, setup
+﻿from setuptools import find_packages, setup
 import glob
 import os
 
@@ -22,7 +22,11 @@ setup(
     license='TODO',
     entry_points={
         'console_scripts': [
-            'target_controller = boat_control.target_controller:main'
+            'target_controller = boat_control.target_controller:main',
+            'simple_gate_follower = boat_control.simple_gate_follower:main',
+            'simple_gate_follower = boat_control.simple_gate_follower:main'
         ],
     },
 )
+
+
