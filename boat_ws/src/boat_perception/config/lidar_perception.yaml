@@ -1,4 +1,4 @@
-pointcloud_to_laserscan:
+﻿pointcloud_to_laserscan:
   ros__parameters:
     target_frame: "base_link"
     transform_tolerance: 0.05
@@ -23,42 +23,47 @@ buoy_detector:
     objects_topic: "/perception/objects"
     markers_topic: "/perception/object_markers"
 
-    # Region of interest.
+    # Conservative initial test search region.
     min_range: 0.75
-    max_range: 25.0
-    min_forward_x: 0.50
-    max_lateral: 8.0
+    max_range: 10.0
+    min_forward_x: 0.60
+    max_lateral: 5.0
+    max_bearing_deg: 45.0
 
-    # Reject objects more than 55 degrees from the bow.
-    max_bearing_deg: 55.0
-
-    # Adaptive cluster segmentation.
+    # Cluster segmentation.
     cluster_gap_base: 0.10
     cluster_gap_per_meter: 0.012
 
     # Candidate geometry.
-    min_cluster_points: 2
+    #
+    # Require more than the previous 2-point minimum,
+    # but do not go all the way to 5 yet because distant
+    # buoys may only produce a few LaserScan returns.
+    min_cluster_points: 4
     good_cluster_points: 7
 
-    min_cluster_width: 0.03
-    max_cluster_width: 0.90
-    max_cluster_depth: 0.90
-    max_radial_span: 0.45
+    min_cluster_width: 0.10
+    max_cluster_width: 0.65
+    max_cluster_depth: 0.50
+    max_radial_span: 0.30
 
     nominal_buoy_width: 0.35
-    size_tolerance: 0.30
+    size_tolerance: 0.25
 
     # Shape / confidence scoring.
-    min_pca_ratio: 0.002
+    min_pca_ratio: 0.004
     good_pca_ratio: 0.050
     good_convexity: 0.025
-    min_candidate_confidence: 0.30
 
-    # Temporal confirmation.
-    confirm_hits: 3
-    max_track_misses: 3
+    # Previous value was 0.30.
+    min_candidate_confidence: 0.50
+
+    # Require repeated observations.
+    confirm_hits: 4
+    max_track_misses: 2
     publish_misses: 0
-    association_distance: 0.55
+
+    association_distance: 0.50
     track_alpha: 0.65
 
 
@@ -69,35 +74,32 @@ gate_detector:
     marker_topic: "/perception/gate_markers"
 
     # Individual buoy requirements.
-    min_buoy_confidence: 0.40
+    min_buoy_confidence: 0.60
 
-    # Current bench-test gate geometry.
-    #
-    # IMPORTANT:
-    # These values are tuned for the approximately 1.4 m center-to-center
-    # gate currently being tested. Change these if the physical water-test
-    # gate spacing is substantially different.
+    # Preserve the current ~1.4 m bench gate geometry.
     min_gate_width: 1.00
     max_gate_width: 1.80
     nominal_gate_width: 1.40
     gate_width_tolerance: 0.35
 
-    # The two gate markers should be at roughly the same forward distance.
-    max_depth_difference: 1.20
+    # Two markers should be roughly side-by-side,
+    # not one substantially behind the other.
+    max_depth_difference: 0.60
 
-    # Require the pair to be predominantly separated laterally.
-    min_lateral_fraction: 0.75
+    # Require separation to be predominantly lateral.
+    min_lateral_fraction: 0.88
 
     # Gate search region.
-    min_center_x: 0.60
-    max_center_x: 15.0
+    min_center_x: 0.75
+    max_center_x: 10.0
 
-    # Final gate confidence requirement.
-    min_gate_confidence: 0.60
+    # Stronger final gate confidence requirement.
+    min_gate_confidence: 0.72
 
-    # Temporal gate confirmation.
-    confirm_hits: 3
-    max_misses: 2
-    center_association_distance: 0.80
-    width_association_tolerance: 0.90
+    # Require repeated gate observations.
+    confirm_hits: 4
+    max_misses: 1
+
+    center_association_distance: 0.65
+    width_association_tolerance: 0.45
     track_alpha: 0.65
