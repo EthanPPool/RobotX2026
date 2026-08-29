@@ -1,0 +1,187 @@
+From 16ad31d0af4a38e360f2bef7b81fe246ed3a2e82 Mon Sep 17 00:00:00 2001
+From: EthanPPool <c00464632@louisiana.edu>
+Date: Sat, 29 Aug 2026 08:55:21 -0500
+Subject: [PATCH] Fix Jetson build and launch integration
+
+---
+ boat_ws/src/boat_bringup/launch/boat_sensors.launch.py         | 2 +-
+ boat_ws/src/boat_bringup/launch/safe_gate_test.launch.py       | 2 +-
+ boat_ws/src/boat_bringup/package.xml                           | 2 +-
+ boat_ws/src/boat_control/boat_control/simple_gate_follower.py  | 2 +-
+ boat_ws/src/boat_control/config/simple_gate_follower.yaml      | 2 +-
+ boat_ws/src/boat_control/launch/simple_gate_control.launch.py  | 2 +-
+ boat_ws/src/boat_control/package.xml                           | 2 +-
+ boat_ws/src/boat_control/setup.py                              | 3 +--
+ boat_ws/src/boat_dashboard/boat_dashboard/dashboard.py         | 2 +-
+ boat_ws/src/boat_dashboard/launch/dashboard.launch.py          | 2 +-
+ boat_ws/src/boat_dashboard/package.xml                         | 2 +-
+ boat_ws/src/boat_dashboard/setup.cfg                           | 2 +-
+ boat_ws/src/boat_dashboard/setup.py                            | 2 +-
+ boat_ws/src/boat_vehicle/boat_vehicle/mavros_command_bridge.py | 2 +-
+ boat_ws/src/boat_vehicle/config/bridge.yaml                    | 2 +-
+ 15 files changed, 15 insertions(+), 16 deletions(-)
+
+diff --git a/boat_ws/src/boat_bringup/launch/boat_sensors.launch.py b/boat_ws/src/boat_bringup/launch/boat_sensors.launch.py
+index 958fd9a..7059cec 100644
+--- a/boat_ws/src/boat_bringup/launch/boat_sensors.launch.py
++++ b/boat_ws/src/boat_bringup/launch/boat_sensors.launch.py
+@@ -44,7 +44,7 @@ def generate_launch_description():
+     boat_description_launch = os.path.join(
+         get_package_share_directory('boat_description'),
+         'launch',
+-        'boat_state_publisher.launch.py'
++        'description.launch.py'
+     )
+ 
+     boat_description = IncludeLaunchDescription(
+diff --git a/boat_ws/src/boat_bringup/launch/safe_gate_test.launch.py b/boat_ws/src/boat_bringup/launch/safe_gate_test.launch.py
+index dd0fc43..63abddc 100644
+--- a/boat_ws/src/boat_bringup/launch/safe_gate_test.launch.py
++++ b/boat_ws/src/boat_bringup/launch/safe_gate_test.launch.py
+@@ -1,4 +1,4 @@
+-﻿#!/usr/bin/env python3
++#!/usr/bin/env python3
+ 
+ import os
+ 
+diff --git a/boat_ws/src/boat_bringup/package.xml b/boat_ws/src/boat_bringup/package.xml
+index 969fa92..3129035 100644
+--- a/boat_ws/src/boat_bringup/package.xml
++++ b/boat_ws/src/boat_bringup/package.xml
+@@ -1,4 +1,4 @@
+-﻿<?xml version='1.0' encoding='utf-8'?>
++<?xml version='1.0' encoding='utf-8'?>
+ <package format="3">
+   <name>boat_bringup</name>
+   <version>0.0.0</version>
+diff --git a/boat_ws/src/boat_control/boat_control/simple_gate_follower.py b/boat_ws/src/boat_control/boat_control/simple_gate_follower.py
+index 3a292a7..8e6b42c 100644
+--- a/boat_ws/src/boat_control/boat_control/simple_gate_follower.py
++++ b/boat_ws/src/boat_control/boat_control/simple_gate_follower.py
+@@ -1,4 +1,4 @@
+-﻿#!/usr/bin/env python3
++#!/usr/bin/env python3
+ 
+ import math
+ 
+diff --git a/boat_ws/src/boat_control/config/simple_gate_follower.yaml b/boat_ws/src/boat_control/config/simple_gate_follower.yaml
+index 59ba5c1..0d7b14d 100644
+--- a/boat_ws/src/boat_control/config/simple_gate_follower.yaml
++++ b/boat_ws/src/boat_control/config/simple_gate_follower.yaml
+@@ -1,4 +1,4 @@
+-﻿simple_gate_follower:
++simple_gate_follower:
+   ros__parameters:
+ 
+     gate_topic: "/perception/gate"
+diff --git a/boat_ws/src/boat_control/launch/simple_gate_control.launch.py b/boat_ws/src/boat_control/launch/simple_gate_control.launch.py
+index 067aeea..d9007e2 100644
+--- a/boat_ws/src/boat_control/launch/simple_gate_control.launch.py
++++ b/boat_ws/src/boat_control/launch/simple_gate_control.launch.py
+@@ -1,4 +1,4 @@
+-﻿import os
++import os
+ 
+ from ament_index_python.packages import get_package_share_directory
+ 
+diff --git a/boat_ws/src/boat_control/package.xml b/boat_ws/src/boat_control/package.xml
+index af62477..b578908 100644
+--- a/boat_ws/src/boat_control/package.xml
++++ b/boat_ws/src/boat_control/package.xml
+@@ -1,4 +1,4 @@
+-﻿<?xml version="1.0"?>
++<?xml version="1.0"?>
+ <package format="3">
+   <name>boat_control</name>
+   <version>0.2.0</version>
+diff --git a/boat_ws/src/boat_control/setup.py b/boat_ws/src/boat_control/setup.py
+index f6dd19a..1d71908 100644
+--- a/boat_ws/src/boat_control/setup.py
++++ b/boat_ws/src/boat_control/setup.py
+@@ -1,4 +1,4 @@
+-﻿from setuptools import find_packages, setup
++from setuptools import find_packages, setup
+ import glob
+ import os
+ 
+@@ -24,7 +24,6 @@ setup(
+         'console_scripts': [
+             'target_controller = boat_control.target_controller:main',
+             'simple_gate_follower = boat_control.simple_gate_follower:main',
+-            'simple_gate_follower = boat_control.simple_gate_follower:main'
+         ],
+     },
+ )
+diff --git a/boat_ws/src/boat_dashboard/boat_dashboard/dashboard.py b/boat_ws/src/boat_dashboard/boat_dashboard/dashboard.py
+index 6be24fb..145df79 100644
+--- a/boat_ws/src/boat_dashboard/boat_dashboard/dashboard.py
++++ b/boat_ws/src/boat_dashboard/boat_dashboard/dashboard.py
+@@ -1,4 +1,4 @@
+-﻿#!/usr/bin/env python3
++#!/usr/bin/env python3
+ 
+ import json
+ import math
+diff --git a/boat_ws/src/boat_dashboard/launch/dashboard.launch.py b/boat_ws/src/boat_dashboard/launch/dashboard.launch.py
+index 9635ec0..0a6b295 100644
+--- a/boat_ws/src/boat_dashboard/launch/dashboard.launch.py
++++ b/boat_ws/src/boat_dashboard/launch/dashboard.launch.py
+@@ -1,4 +1,4 @@
+-﻿from launch import LaunchDescription
++from launch import LaunchDescription
+ from launch_ros.actions import Node
+ 
+ 
+diff --git a/boat_ws/src/boat_dashboard/package.xml b/boat_ws/src/boat_dashboard/package.xml
+index eb5feb5..c493b32 100644
+--- a/boat_ws/src/boat_dashboard/package.xml
++++ b/boat_ws/src/boat_dashboard/package.xml
+@@ -1,4 +1,4 @@
+-﻿<?xml version="1.0"?>
++<?xml version="1.0"?>
+ <package format="3">
+   <name>boat_dashboard</name>
+   <version>0.1.0</version>
+diff --git a/boat_ws/src/boat_dashboard/setup.cfg b/boat_ws/src/boat_dashboard/setup.cfg
+index 33d0f73..8cbab21 100644
+--- a/boat_ws/src/boat_dashboard/setup.cfg
++++ b/boat_ws/src/boat_dashboard/setup.cfg
+@@ -1,4 +1,4 @@
+-﻿[develop]
++[develop]
+ script_dir=$base/lib/boat_dashboard
+ 
+ [install]
+diff --git a/boat_ws/src/boat_dashboard/setup.py b/boat_ws/src/boat_dashboard/setup.py
+index 412fb70..7ffca44 100644
+--- a/boat_ws/src/boat_dashboard/setup.py
++++ b/boat_ws/src/boat_dashboard/setup.py
+@@ -1,4 +1,4 @@
+-﻿from setuptools import find_packages, setup
++from setuptools import find_packages, setup
+ import glob
+ import os
+ 
+diff --git a/boat_ws/src/boat_vehicle/boat_vehicle/mavros_command_bridge.py b/boat_ws/src/boat_vehicle/boat_vehicle/mavros_command_bridge.py
+index 354e376..3d837c4 100644
+--- a/boat_ws/src/boat_vehicle/boat_vehicle/mavros_command_bridge.py
++++ b/boat_ws/src/boat_vehicle/boat_vehicle/mavros_command_bridge.py
+@@ -1,4 +1,4 @@
+-﻿#!/usr/bin/env python3
++#!/usr/bin/env python3
+ 
+ import copy
+ import signal
+diff --git a/boat_ws/src/boat_vehicle/config/bridge.yaml b/boat_ws/src/boat_vehicle/config/bridge.yaml
+index 8d881ab..8400e25 100644
+--- a/boat_ws/src/boat_vehicle/config/bridge.yaml
++++ b/boat_ws/src/boat_vehicle/config/bridge.yaml
+@@ -1,4 +1,4 @@
+-﻿mavros_command_bridge:
++mavros_command_bridge:
+   ros__parameters:
+     input_topic: "/control/cmd_vel"
+     output_topic: "/mavros/setpoint_velocity/cmd_vel"
+-- 
+2.43.0
+
