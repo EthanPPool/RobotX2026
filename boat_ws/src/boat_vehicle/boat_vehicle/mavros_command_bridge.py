@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 
 import copy
 import signal
@@ -55,7 +55,7 @@ class MavrosCommandBridge(Node):
 
         self.deadman_timeout = float(
             self.declare_parameter(
-                'deadman_timeout', 0.35
+                'deadman_timeout', 0.25
             ).value
         )
 
@@ -67,13 +67,13 @@ class MavrosCommandBridge(Node):
 
         self.max_forward_speed = float(
             self.declare_parameter(
-                'max_forward_speed', 0.60
+                'max_forward_speed', 0.15
             ).value
         )
 
         self.max_yaw_rate = float(
             self.declare_parameter(
-                'max_yaw_rate', 0.50
+                'max_yaw_rate', 0.15
             ).value
         )
 
@@ -113,6 +113,12 @@ class MavrosCommandBridge(Node):
             self.estop_callback
         )
 
+        self.autonomy_srv = self.create_service(
+            SetBool,
+            '/vehicle/set_autonomy',
+            self.autonomy_callback
+        )
+
         self.timer = self.create_timer(
             1.0 / max(self.publish_rate, 1.0),
             self.update
@@ -130,48 +136,122 @@ class MavrosCommandBridge(Node):
     def state_callback(self, msg: State) -> None:
         self.vehicle_state = msg
 
+    def clear_stored_command(self) -> None:
+        """Prevent any previously received command from being reused."""
+        self.last_command = None
+        self.last_command_time = None
+
     def estop_callback(self, request, response):
         active = bool(request.data)
 
+        # Any E-stop transition also disables autonomy.
+        #
+        # This is intentional:
+        # clearing an E-stop must NEVER automatically restore motion.
         self.set_parameters([
             Parameter(
                 'software_estop',
                 Parameter.Type.BOOL,
                 active
-            )
+            ),
+            Parameter(
+                'autonomy_enabled',
+                Parameter.Type.BOOL,
+                False
+            ),
         ])
 
+        self.clear_stored_command()
+
+        # Do not wait for the normal update timer.
+        self.publish_zero()
+
         if active:
-            # Prevent an old command from resuming after E-stop reset.
-            self.last_command = None
-            self.last_command_time = None
-
-            # Send zero immediately instead of waiting for timer.
-            self.publish_zero()
-
             response.success = True
             response.message = (
-                'SOFTWARE E-STOP ENGAGED: propulsion command forced to zero'
+                'SOFTWARE STOP ENGAGED: zero output; autonomy disabled'
             )
 
             self.get_logger().error(
-                'SOFTWARE E-STOP ENGAGED'
+                'SOFTWARE STOP ENGAGED: AUTONOMY DISABLED'
             )
 
         else:
-            # Still requires autonomy_enabled + fresh command + all other
-            # authorization conditions before anything can move.
-            self.last_command = None
-            self.last_command_time = None
-
             response.success = True
             response.message = (
-                'Software E-stop cleared; waiting for fresh authorized command'
+                'Software stop cleared. Autonomy remains DISABLED '
+                'and must be explicitly re-enabled.'
             )
 
             self.get_logger().warn(
-                'Software E-stop cleared. '
-                'Fresh command still required.'
+                'Software stop cleared. '
+                'AUTONOMY REMAINS DISABLED.'
+            )
+
+        return response
+
+    def autonomy_callback(self, request, response):
+        enable = bool(request.data)
+
+        # It must not be possible to arm the software autonomy gate
+        # underneath an active software stop.
+        if enable and bool(
+            self.get_parameter('software_estop').value
+        ):
+            self.set_parameters([
+                Parameter(
+                    'autonomy_enabled',
+                    Parameter.Type.BOOL,
+                    False
+                )
+            ])
+
+            self.clear_stored_command()
+            self.publish_zero()
+
+            response.success = False
+            response.message = (
+                'Cannot enable autonomy while software stop is active'
+            )
+
+            self.get_logger().error(
+                'AUTONOMY ENABLE REJECTED: software stop is active'
+            )
+
+            return response
+
+        self.set_parameters([
+            Parameter(
+                'autonomy_enabled',
+                Parameter.Type.BOOL,
+                enable
+            )
+        ])
+
+        # Every enable/disable transition invalidates old commands.
+        self.clear_stored_command()
+        self.publish_zero()
+
+        if enable:
+            response.success = True
+            response.message = (
+                'Autonomy enabled; waiting for a fresh command and '
+                'all vehicle authorization conditions'
+            )
+
+            self.get_logger().warn(
+                'AUTONOMY ENABLED: fresh command, connection, arm, '
+                'and allowed mode are still required'
+            )
+
+        else:
+            response.success = True
+            response.message = (
+                'Autonomy disabled: propulsion output forced to zero'
+            )
+
+            self.get_logger().warn(
+                'AUTONOMY DISABLED'
             )
 
         return response
@@ -180,7 +260,9 @@ class MavrosCommandBridge(Node):
         if bool(self.get_parameter('software_estop').value):
             return False
 
-        if not bool(self.get_parameter('autonomy_enabled').value):
+        if not bool(
+            self.get_parameter('autonomy_enabled').value
+        ):
             return False
 
         if self.vehicle_state is None:
@@ -224,14 +306,21 @@ class MavrosCommandBridge(Node):
 
     def publish_zero_burst(self) -> None:
         """Send repeated zero commands immediately before shutdown."""
-        self.last_command = None
-        self.last_command_time = None
+        self.clear_stored_command()
 
-        duration = max(self.shutdown_zero_duration, 0.0)
-        period = 1.0 / max(self.publish_rate, 20.0)
+        duration = max(
+            self.shutdown_zero_duration,
+            0.0
+        )
+
+        period = 1.0 / max(
+            self.publish_rate,
+            20.0
+        )
 
         self.get_logger().warn(
-            f'SHUTDOWN: publishing ZERO velocity for {duration:.2f} s'
+            f'SHUTDOWN: publishing ZERO velocity for '
+            f'{duration:.2f} s'
         )
 
         end_time = time.monotonic() + duration
@@ -240,7 +329,6 @@ class MavrosCommandBridge(Node):
             self.publish_zero()
             time.sleep(period)
 
-        # One final zero.
         self.publish_zero()
 
     def update(self) -> None:
@@ -249,7 +337,10 @@ class MavrosCommandBridge(Node):
             return
 
         out = copy.deepcopy(self.last_command)
-        out.header.stamp = self.get_clock().now().to_msg()
+
+        out.header.stamp = (
+            self.get_clock().now().to_msg()
+        )
         out.header.frame_id = 'base_link'
 
         out.twist.linear.x = max(
@@ -280,7 +371,7 @@ class MavrosCommandBridge(Node):
 def main(args=None):
     stop_requested = False
 
-    # We handle SIGINT/SIGTERM ourselves so the ROS context remains alive
+    # Handle SIGINT/SIGTERM ourselves so the ROS context remains alive
     # long enough to transmit the shutdown-zero burst.
     rclpy.init(
         args=args,
@@ -293,19 +384,31 @@ def main(args=None):
         nonlocal stop_requested
         stop_requested = True
 
-    signal.signal(signal.SIGINT, request_shutdown)
-    signal.signal(signal.SIGTERM, request_shutdown)
+    signal.signal(
+        signal.SIGINT,
+        request_shutdown
+    )
+
+    signal.signal(
+        signal.SIGTERM,
+        request_shutdown
+    )
 
     try:
         while rclpy.ok() and not stop_requested:
-            rclpy.spin_once(node, timeout_sec=0.10)
+            rclpy.spin_once(
+                node,
+                timeout_sec=0.10
+            )
 
     finally:
         try:
             node.publish_zero_burst()
+
         except Exception as exc:
             node.get_logger().error(
-                f'Failed while publishing shutdown zero burst: {exc}'
+                'Failed while publishing shutdown '
+                f'zero burst: {exc}'
             )
 
         node.destroy_node()

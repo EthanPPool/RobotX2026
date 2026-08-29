@@ -1,13 +1,22 @@
-mavros_command_bridge:
+﻿mavros_command_bridge:
   ros__parameters:
     input_topic: "/control/cmd_vel"
     output_topic: "/mavros/setpoint_velocity/cmd_vel"
     state_topic: "/mavros/state"
 
+    # Boot-safe propulsion gates.
     autonomy_enabled: false
+    software_estop: true
+
     allowed_modes: ["GUIDED"]
-    deadman_timeout: 0.35
+
+    # Stop forwarding if control commands stop arriving.
+    deadman_timeout: 0.25
     publish_rate: 20.0
 
-    max_forward_speed: 0.60
-    max_yaw_rate: 0.50
+    # Intentionally conservative initial water-test limits.
+    max_forward_speed: 0.15
+    max_yaw_rate: 0.15
+
+    # Continue transmitting zeros briefly during clean shutdown.
+    shutdown_zero_duration: 0.50
