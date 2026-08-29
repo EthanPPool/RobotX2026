@@ -32,39 +32,57 @@ def generate_launch_description():
     start_control = LaunchConfiguration('start_control')
     start_vehicle = LaunchConfiguration('start_vehicle')
     start_mavros = LaunchConfiguration('start_mavros')
+    start_dashboard = LaunchConfiguration('start_dashboard')
 
     autonomy_enabled = LaunchConfiguration('autonomy_enabled')
     fcu_url = LaunchConfiguration('fcu_url')
 
     arguments = [
+
         DeclareLaunchArgument(
             'start_sensors',
             default_value='true',
-            description='Start BlueBoat description and Unitree L2 sensor stack.',
+            description=(
+                'Start BlueBoat description and Unitree L2 sensor stack.'
+            ),
         ),
 
         DeclareLaunchArgument(
             'start_perception',
             default_value='true',
-            description='Start conservative buoy and gate perception.',
+            description=(
+                'Start conservative buoy and gate perception.'
+            ),
         ),
 
         DeclareLaunchArgument(
             'start_control',
             default_value='true',
-            description='Start fail-stop simple gate follower.',
+            description=(
+                'Start fail-stop simple gate follower.'
+            ),
         ),
 
         DeclareLaunchArgument(
             'start_vehicle',
             default_value='true',
-            description='Start MAVROS command safety bridge.',
+            description=(
+                'Start MAVROS command safety bridge.'
+            ),
         ),
 
         DeclareLaunchArgument(
             'start_mavros',
             default_value='true',
             description='Start MAVROS.',
+        ),
+
+        DeclareLaunchArgument(
+            'start_dashboard',
+            default_value='true',
+            description=(
+                'Start browser-based test dashboard.'
+            ),
         ),
 
         DeclareLaunchArgument(
@@ -79,9 +97,15 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'fcu_url',
             default_value='udp://0.0.0.0:14550@',
-            description='MAVROS connection to BlueOS/ArduRover.',
+            description=(
+                'MAVROS connection to BlueOS/ArduRover.'
+            ),
         ),
     ]
+
+    # --------------------------------------------------------------
+    # Sensors
+    # --------------------------------------------------------------
 
     sensors = IncludeLaunchDescription(
         package_launch(
@@ -91,6 +115,10 @@ def generate_launch_description():
         condition=IfCondition(start_sensors),
     )
 
+    # --------------------------------------------------------------
+    # Perception
+    # --------------------------------------------------------------
+
     perception = IncludeLaunchDescription(
         package_launch(
             'boat_perception',
@@ -99,6 +127,14 @@ def generate_launch_description():
         condition=IfCondition(start_perception),
     )
 
+    # --------------------------------------------------------------
+    # Simple fail-stop gate follower
+    #
+    # IMPORTANT:
+    # This replaces the old mission state machine + TargetController
+    # in this test configuration.
+    # --------------------------------------------------------------
+
     simple_control = IncludeLaunchDescription(
         package_launch(
             'boat_control',
@@ -106,6 +142,10 @@ def generate_launch_description():
         ),
         condition=IfCondition(start_control),
     )
+
+    # --------------------------------------------------------------
+    # MAVROS + command bridge
+    # --------------------------------------------------------------
 
     vehicle = IncludeLaunchDescription(
         package_launch(
@@ -120,19 +160,51 @@ def generate_launch_description():
         }.items(),
     )
 
+    # --------------------------------------------------------------
+    # Browser dashboard
+    # --------------------------------------------------------------
+
+    dashboard = IncludeLaunchDescription(
+        package_launch(
+            'boat_dashboard',
+            'dashboard.launch.py',
+        ),
+        condition=IfCondition(start_dashboard),
+    )
+
+    # --------------------------------------------------------------
+    # Startup safety message
+    # --------------------------------------------------------------
+
     safety_message = LogInfo(
         msg=[
             '\n'
             '============================================================\n'
-            ' RobotX SAFE single-gate test stack starting\n'
+            ' RobotX SAFE SINGLE-GATE TEST STACK\n'
+            '============================================================\n'
             '\n'
             ' OLD MISSION STATE MACHINE: NOT STARTED\n'
             ' OLD TARGET CONTROLLER:      NOT STARTED\n'
             '\n'
-            ' Simple gate follower starts DISABLED.\n'
-            ' MAVROS command bridge autonomy_enabled = ',
+            ' Active control path:\n'
+            '\n'
+            ' LiDAR\n'
+            '   -> Buoy Detector\n'
+            '   -> Gate Detector\n'
+            '   -> Simple Gate Follower\n'
+            '   -> MAVROS Command Bridge\n'
+            '   -> MAVROS / ArduRover\n'
+            '\n'
+            ' STARTUP SAFETY STATE:\n'
+            '\n'
+            ' Simple Gate Follower: DISABLED\n'
+            ' Software Stop:        ACTIVE\n'
+            ' Bridge Autonomy:      ',
             autonomy_enabled,
             '\n'
+            '\n'
+            ' Dashboard:\n'
+            ' http://<JETSON-IP>:8080\n'
             '\n'
             ' STARTUP MUST PRODUCE ZERO PROPULSION.\n'
             '============================================================'
@@ -147,5 +219,6 @@ def generate_launch_description():
             perception,
             simple_control,
             vehicle,
+            dashboard,
         ]
     )

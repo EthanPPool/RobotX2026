@@ -1,4 +1,4 @@
-<?xml version='1.0' encoding='utf-8'?>
+﻿<?xml version='1.0' encoding='utf-8'?>
 <package format="3">
   <name>boat_bringup</name>
   <version>0.0.0</version>
@@ -22,4 +22,5 @@
   <export>
     <build_type>ament_cmake</build_type>
   </export>
+  <exec_depend>boat_dashboard</exec_depend>
 </package>
