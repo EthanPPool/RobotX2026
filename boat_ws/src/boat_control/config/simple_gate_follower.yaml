@@ -1,4 +1,4 @@
-﻿simple_gate_follower:
+simple_gate_follower:
   ros__parameters:
 
     gate_topic: "/perception/gate"

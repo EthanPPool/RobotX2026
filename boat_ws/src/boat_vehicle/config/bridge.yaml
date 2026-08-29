@@ -1,4 +1,4 @@
-﻿mavros_command_bridge:
+mavros_command_bridge:
   ros__parameters:
     input_topic: "/control/cmd_vel"
     output_topic: "/mavros/setpoint_velocity/cmd_vel"

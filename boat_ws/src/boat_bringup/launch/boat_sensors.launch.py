@@ -44,7 +44,7 @@ def generate_launch_description():
     boat_description_launch = os.path.join(
         get_package_share_directory('boat_description'),
         'launch',
-        'boat_state_publisher.launch.py'
+        'description.launch.py'
     )
 
     boat_description = IncludeLaunchDescription(
