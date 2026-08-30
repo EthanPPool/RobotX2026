@@ -28,7 +28,7 @@ buoy_detector:
     max_range: 10.0
     min_forward_x: 0.60
     max_lateral: 5.0
-    max_bearing_deg: 70.0
+    max_bearing_deg: 45.0
 
     # Cluster segmentation.
     cluster_gap_base: 0.10
@@ -59,12 +59,12 @@ buoy_detector:
     min_candidate_confidence: 0.50
 
     # Require repeated observations.
-    confirm_hits: 2
-    max_track_misses: 6
-    publish_misses: 2
+    confirm_hits: 4
+    max_track_misses: 2
+    publish_misses: 0
 
-    association_distance: 0.75
-    track_alpha: 0.55
+    association_distance: 0.50
+    track_alpha: 0.65
 
 
 gate_detector:
@@ -77,10 +77,10 @@ gate_detector:
     min_buoy_confidence: 0.60
 
     # Preserve the current ~1.4 m bench gate geometry.
-    min_gate_width: 1.83
-    max_gate_width: 3.05
-    nominal_gate_width: 2.44
-    gate_width_tolerance: 0.75
+    min_gate_width: 1.00
+    max_gate_width: 1.80
+    nominal_gate_width: 1.40
+    gate_width_tolerance: 0.35
 
     # Two markers should be roughly side-by-side,
     # not one substantially behind the other.
@@ -97,9 +97,9 @@ gate_detector:
     min_gate_confidence: 0.72
 
     # Require repeated gate observations.
-    confirm_hits: 2
-    max_misses: 6
+    confirm_hits: 4
+    max_misses: 1
 
-    center_association_distance: 1.00
-    width_association_tolerance: 1.00
-    track_alpha: 0.55
+    center_association_distance: 0.65
+    width_association_tolerance: 0.45
+    track_alpha: 0.65

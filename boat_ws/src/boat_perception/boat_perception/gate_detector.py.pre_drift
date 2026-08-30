@@ -47,20 +47,6 @@ class GateDetector(Node):
             ).value
         )
 
-        # Maximum angle between a square-on gate and the
-        # gate as observed from the drifting/yawing boat.
-        #
-        # 0 deg = perfectly square to gate
-        # 55 deg = substantial yaw/drift still accepted
-        self.max_gate_skew_deg = float(
-            self.declare_parameter(
-                'max_gate_skew_deg', 55.0
-            ).value
-        )
-        self.max_gate_skew_rad = math.radians(
-            self.max_gate_skew_deg
-        )
-
         self.max_depth_difference = float(
             self.declare_parameter(
                 'max_depth_difference', 1.20
@@ -96,15 +82,6 @@ class GateDetector(Node):
         self.center_association_distance = float(
             self.declare_parameter(
                 'center_association_distance', 0.80
-            ).value
-        )
-
-        # Add association allowance as range increases.
-        # This helps compensate for boat motion and angular
-        # jitter in the body-frame LiDAR measurements.
-        self.center_association_per_meter = float(
-            self.declare_parameter(
-                'center_association_per_meter', 0.05
             ).value
         )
         self.width_association_tolerance = float(
@@ -213,33 +190,20 @@ class GateDetector(Node):
             if width > self.max_gate_width:
                 continue
 
-            # ------------------------------------------------
-            # DRIFT / YAW TOLERANT GATE GEOMETRY
-            # ------------------------------------------------
-            #
-            # The previous detector rejected a gate whenever
-            # one buoy was > max_depth_difference farther ahead
-            # than the other. That is not rotation invariant:
-            # simply yawing the boat can make a real gate fail.
-            #
-            # Instead, calculate the observed skew of the gate.
-            # A square-on gate has dx ~= 0. A yawed/drifting
-            # boat produces increasing dx while gate width
-            # itself remains approximately unchanged.
             depth_difference = abs(dx)
 
+            if depth_difference > self.max_depth_difference:
+                continue
+
+            # Gate markers should be predominantly separated laterally,
+            # rather than one marker being far behind the other.
             lateral_fraction = (
                 abs(dy) / width
                 if width > 1e-6
                 else 0.0
             )
 
-            gate_skew = math.atan2(
-                depth_difference,
-                max(abs(dy), 1e-6)
-            )
-
-            if gate_skew > self.max_gate_skew_rad:
+            if lateral_fraction < self.min_lateral_fraction:
                 continue
 
             center_x = 0.5 * (
@@ -260,12 +224,11 @@ class GateDetector(Node):
                 + float(b.confidence)
             )
 
-            # Smoothly reduce confidence as the boat becomes
-            # less square to the gate instead of abruptly
-            # rejecting a valid gate.
             alignment_score = max(
                 0.0,
-                math.cos(gate_skew)
+                1.0
+                - depth_difference
+                / max(self.max_depth_difference, 1e-6)
             )
 
             width_error = (
@@ -319,22 +282,8 @@ class GateDetector(Node):
             candidate['width'] - self.tracked_width
         )
 
-        # A fixed body-frame association radius is too brittle
-        # on a moving USV. Permit a modestly larger displacement
-        # for gates farther from the LiDAR.
-        track_range = math.hypot(
-            self.tracked_center_x,
-            self.tracked_center_y
-        )
-
-        association_limit = (
-            self.center_association_distance
-            + self.center_association_per_meter
-            * track_range
-        )
-
         same_gate = (
-            center_distance <= association_limit
+            center_distance <= self.center_association_distance
             and width_difference
             <= self.width_association_tolerance
         )
