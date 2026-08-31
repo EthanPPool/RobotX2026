@@ -1,0 +1,18 @@
+{
+    "github.copilot.chat.codeGeneration.useInstructionFiles": true,
+    "ROS2.distro": "kilted",
+    "python.autoComplete.extraPaths": [
+        "/home/leo/boat_ws/install/mavros_examples/lib/python3.12/site-packages",
+        "/home/leo/boat_ws/install/mavros/lib/python3.12/site-packages",
+        "/home/leo/boat_ws/install/mavros_msgs/lib/python3.12/site-packages",
+        "/home/leo/boat_ws/install/boat_mapping/lib/python3.12/site-packages",
+        "/opt/ros/kilted/lib/python3.12/site-packages"
+    ],
+    "python.analysis.extraPaths": [
+        "/home/leo/boat_ws/install/mavros_examples/lib/python3.12/site-packages",
+        "/home/leo/boat_ws/install/mavros/lib/python3.12/site-packages",
+        "/home/leo/boat_ws/install/mavros_msgs/lib/python3.12/site-packages",
+        "/home/leo/boat_ws/install/boat_mapping/lib/python3.12/site-packages",
+        "/opt/ros/kilted/lib/python3.12/site-packages"
+    ]
+}

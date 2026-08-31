@@ -1,0 +1,174 @@
+--- src/boat_dashboard/boat_dashboard/dashboard.py
++++ src/boat_dashboard/boat_dashboard/dashboard.py
+@@ -11,7 +11,7 @@
+ from mavros_msgs.msg import State, SysStatus
+ from mavros_msgs.srv import CommandBool, SetMode
+ from rclpy.node import Node
+-from std_msgs.msg import Bool
++from std_msgs.msg import Bool, String
+ from std_srvs.srv import SetBool, Trigger
+ 
+ from boat_interfaces.msg import DetectedObjectArray, Gate
+@@ -153,6 +153,17 @@
+             color: #abb4bb;
+             font-size: 13px;
+         }
++
++        .state-machine-status {
++            margin-top: 12px;
++            padding: 16px;
++            border-radius: 7px;
++            background: #101418;
++            font-family: monospace;
++            font-size: 17px;
++            line-height: 1.4;
++            overflow-wrap: anywhere;
++        }
+     </style>
+ </head>
+ 
+@@ -273,6 +284,20 @@
+         </div>
+ 
+         <div class="card">
++            <h2>State Machine</h2>
++
++            <div id="stateMachine"
++                 class="value neutral state-machine-status">
++                OFF
++            </div>
++
++            <div class="small" style="margin-top:10px;">
++                Displays the two-gate controller state only while
++                autonomy is enabled.
++            </div>
++        </div>
++
++        <div class="card">
+             <h2>Bridge Output</h2>
+ 
+             <div class="row">
+@@ -676,11 +701,19 @@
+ 
+         setState(
+             "gate",
+-            s.gate_fresh ? "DETECTED" : "NONE",
+             s.gate_fresh
++                ? "DETECTED"
++                : s.gate_seen
++                    ? "HELD (LAST)"
++                    : "NONE",
++            s.gate_fresh
++                ? true
++                : s.gate_seen
++                    ? null
++                    : false
+         );
+ 
+-        if (s.gate_fresh) {
++        if (s.gate_seen) {
+             document.getElementById(
+                 "confidence"
+             ).textContent =
+@@ -725,6 +758,18 @@
+             s.control_ready
+         );
+ 
++        setState(
++            "stateMachine",
++            s.autonomy_enabled
++                ? (s.mission_state || "WAITING FOR STATE")
++                : "OFF",
++            s.autonomy_enabled ? true : null
++        );
++
++        document.getElementById(
++            "stateMachine"
++        ).classList.add("state-machine-status");
++
+         document.getElementById(
+             "bridgeX"
+         ).textContent =
+@@ -917,6 +962,8 @@
+         self.control_forward = 0.0
+         self.control_yaw = 0.0
+ 
++        self.mission_state = None
++
+         self.bridge_forward = 0.0
+         self.bridge_yaw = 0.0
+         self.last_bridge_time = None
+@@ -983,6 +1030,13 @@
+         )
+ 
+         self.create_subscription(
++            String,
++            '/mission/state',
++            self.mission_state_callback,
++            10
++        )
++
++        self.create_subscription(
+             TwistStamped,
+             '/mavros/setpoint_velocity/cmd_vel',
+             self.bridge_callback,
+@@ -1122,6 +1176,13 @@
+             msg.twist.angular.z
+         )
+ 
++    def mission_state_callback(self, msg):
++        state = str(msg.data).strip()
++
++        self.mission_state = (
++            state if state else None
++        )
++
+     def bridge_callback(self, msg):
+         self.bridge_forward = float(
+             msg.twist.linear.x
+@@ -1352,6 +1413,7 @@
+             )
+ 
+         gate_fresh = self.gate_is_fresh()
++        gate_seen = self.last_gate is not None
+ 
+         gate_confidence = 0.0
+         gate_x = 0.0
+@@ -1443,6 +1505,14 @@
+             self.control_state
+         )
+ 
++        autonomy_enabled = (
++            mode.upper() == 'GUIDED'
++            and self.control_state in (
++                'ENABLED',
++                'AUTONOMY READY / DISARMED',
++            )
++        )
++
+         if (
+             mode == 'HOLD'
+             and self.control_state == 'ENABLED'
+@@ -1468,6 +1538,7 @@
+             'buoy_count': self.buoy_count,
+ 
+             'gate_fresh': gate_fresh,
++            'gate_seen': gate_seen,
+             'gate_confidence': gate_confidence,
+             'gate_x': gate_x,
+             'gate_y': gate_y,
+@@ -1491,6 +1562,14 @@
+             'control_state':
+                 display_state,
+ 
++            'autonomy_enabled':
++                autonomy_enabled,
++            'mission_state': (
++                self.mission_state
++                if autonomy_enabled
++                else 'OFF'
++            ),
++
+             'can_enable':
+                 can_enable,
+         }

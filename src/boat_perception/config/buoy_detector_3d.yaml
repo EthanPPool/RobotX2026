@@ -1,0 +1,75 @@
+buoy_detector_3d:
+  ros__parameters:
+    cloud_topic: "/unilidar/cloud"
+    # Canonical production topics consumed by gate_detector and RViz.
+    objects_topic: "/perception/objects"
+    markers_topic: "/perception/object_markers"
+    target_frame: "base_link"
+    transform_timeout: 0.08
+
+    # Broad initial ROI.  min_z/max_z will be tightened after observing the
+    # buoy and waterline in base_link on the real boat.
+    min_range: 0.75
+    max_range: 10.0
+    min_forward_x: 0.60
+    max_lateral: 5.0
+    max_bearing_deg: 70.0
+    min_z: -0.58
+    max_z: 1.50
+
+    # 3D downsampling followed by range-adaptive XY-footprint clustering.
+    # This joins vertically separated LiDAR scan bands from one tall buoy;
+    # all candidate measurements and rejection tests remain fully 3D.
+    voxel_size: 0.03
+    cluster_tolerance_base: 0.10
+    cluster_tolerance_per_meter: 0.008
+    min_cluster_points: 6
+    good_cluster_points: 18
+    max_cluster_points: 1500
+
+    # Measured buoy diameter: 10-12 in = 0.254-0.305 m.
+    # Hard rejection limits remain wider for partial LiDAR returns.
+    min_diameter: 0.12
+    max_diameter: 0.65
+    nominal_diameter: 0.28
+    diameter_tolerance: 0.16
+
+    # Measured exposed height: 35-40 in = 0.889-1.016 m.
+    min_object_height: 0.35
+    max_object_height: 1.40
+    nominal_object_height: 0.95
+    height_tolerance: 0.45
+
+    max_radial_depth: 0.65
+    min_height_to_diameter: 1.0
+    min_verticality: 0.55
+    good_verticality: 0.85
+    min_candidate_confidence: 0.55
+
+    # Real buoy stepped profile: broad lower disk plus narrow upper cylinder.
+    # Evidence accumulates temporally because the rotating LiDAR does not
+    # illuminate the entire lower disk in every frame.
+    require_step_signature: true
+    step_lower_start_fraction: 0.02
+    step_lower_end_fraction: 0.28
+    step_upper_start_fraction: 0.38
+    step_upper_end_fraction: 0.88
+    step_min_points_per_band: 6
+    step_min_upper_width: 0.16
+    step_max_upper_width: 0.36
+    step_min_lower_width: 0.30
+    step_max_lower_width: 0.60
+    step_min_ratio: 1.15
+    step_good_ratio: 1.45
+    step_confirm_hits: 2
+    step_evidence_limit: 4
+
+    # Multi-frame confirmation in the moving body frame.
+    confirm_hits: 3
+    max_track_misses: 3
+    publish_misses: 2
+    association_distance: 0.45
+    association_distance_per_meter: 0.03
+    track_alpha: 0.60
+
+    diagnostic_period: 2.0

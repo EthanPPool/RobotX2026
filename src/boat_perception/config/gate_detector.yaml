@@ -1,0 +1,38 @@
+gate_detector:
+  ros__parameters:
+    objects_topic: "/perception/objects"
+    gate_topic: "/perception/gate"
+    marker_topic: "/perception/gate_markers"
+
+    # Validated 3D buoy-pair requirements.
+    min_buoy_confidence: 0.60
+
+    # RobotX gate separation: 6-10 ft = 1.83-3.05 m.
+    min_gate_width: 1.83
+    max_gate_width: 3.05
+    nominal_gate_width: 2.44
+    gate_width_tolerance: 0.75
+
+    # Accept a real gate while the boat is yawed relative to it.
+    max_gate_skew_deg: 55.0
+    max_depth_difference: 0.60
+    min_lateral_fraction: 0.88
+
+    min_center_x: 0.75
+    max_center_x: 10.0
+    min_gate_confidence: 0.72
+
+    # Multi-frame confirmation and moving-body-frame association.
+    confirm_hits: 2
+    max_misses: 6
+
+    # Gate state estimator output. Real 3D measurements arrive near 1.2 Hz;
+    # publish the latest confirmed measurement at control rate, but stop
+    # after a bounded gap instead of holding stale data indefinitely.
+    publish_rate: 10.0
+    hold_timeout: 1.80
+
+    center_association_distance: 1.00
+    center_association_per_meter: 0.05
+    width_association_tolerance: 1.00
+    track_alpha: 0.55

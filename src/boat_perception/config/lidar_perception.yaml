@@ -1,0 +1,105 @@
+﻿pointcloud_to_laserscan:
+  ros__parameters:
+    target_frame: "base_link"
+    transform_tolerance: 0.05
+
+    # 3D point-cloud slice converted into the 2D perception scan.
+    min_height: -0.20
+    max_height: 1.50
+
+    angle_min: -1.57079632679
+    angle_max: 1.57079632679
+    angle_increment: 0.00872664626
+    scan_time: 0.055
+
+    range_min: 0.50
+    range_max: 30.0
+    use_inf: true
+
+
+buoy_detector:
+  ros__parameters:
+    scan_topic: "/perception/scan"
+    objects_topic: "/perception/objects"
+    markers_topic: "/perception/object_markers"
+
+    # Conservative initial test search region.
+    min_range: 0.75
+    max_range: 10.0
+    min_forward_x: 0.60
+    max_lateral: 5.0
+    max_bearing_deg: 70.0
+
+    # Cluster segmentation.
+    cluster_gap_base: 0.10
+    cluster_gap_per_meter: 0.012
+
+    # Candidate geometry.
+    #
+    # Require more than the previous 2-point minimum,
+    # but do not go all the way to 5 yet because distant
+    # buoys may only produce a few LaserScan returns.
+    min_cluster_points: 4
+    good_cluster_points: 7
+
+    min_cluster_width: 0.10
+    max_cluster_width: 0.65
+    max_cluster_depth: 0.50
+    max_radial_span: 0.30
+
+    nominal_buoy_width: 0.35
+    size_tolerance: 0.25
+
+    # Shape / confidence scoring.
+    min_pca_ratio: 0.004
+    good_pca_ratio: 0.050
+    good_convexity: 0.025
+
+    # Previous value was 0.30.
+    min_candidate_confidence: 0.50
+
+    # Require repeated observations.
+    confirm_hits: 2
+    max_track_misses: 6
+    publish_misses: 2
+
+    association_distance: 0.75
+    track_alpha: 0.55
+
+
+gate_detector:
+  ros__parameters:
+    objects_topic: "/perception/objects"
+    gate_topic: "/perception/gate"
+    marker_topic: "/perception/gate_markers"
+
+    # Individual buoy requirements.
+    min_buoy_confidence: 0.60
+
+    # Preserve the current ~1.4 m bench gate geometry.
+    min_gate_width: 1.83
+    max_gate_width: 3.05
+    nominal_gate_width: 2.44
+    gate_width_tolerance: 0.75
+
+    # Two markers should be roughly side-by-side,
+    # not one substantially behind the other.
+    max_depth_difference: 0.60
+
+    # Require separation to be predominantly lateral.
+    min_lateral_fraction: 0.88
+
+    # Gate search region.
+    min_center_x: 0.75
+    max_center_x: 10.0
+
+    # Stronger final gate confidence requirement.
+    min_gate_confidence: 0.72
+
+    # Require repeated gate observations.
+    confirm_hits: 2
+    max_misses: 6
+
+    center_association_distance: 1.00
+    width_association_tolerance: 1.00
+    track_alpha: 0.55

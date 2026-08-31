@@ -1,0 +1,28 @@
+simple_gate_follower:
+  ros__parameters:
+
+    gate_topic: "/perception/gate"
+    cmd_topic: "/control/cmd_vel"
+
+    # CRITICAL:
+    # Starting ROS must never automatically enable propulsion.
+    enabled: false
+
+    # Gate must already have passed the gate detector's
+    # confidence/confirmation logic.
+    min_gate_confidence: 0.75
+
+    # Stop if the gate detector has not produced a fresh
+    # valid gate within this period.
+    gate_timeout: 0.30
+
+    # Intentionally low values for initial water testing.
+    forward_speed: 0.12
+    yaw_kp: 0.60
+    max_yaw_rate: 0.12
+
+    # Do not move forward unless approximately centered.
+    forward_enable_angle_deg: 20.0
+
+    # Reject gates essentially on top of or behind the boat.
+    min_gate_x: 0.50
