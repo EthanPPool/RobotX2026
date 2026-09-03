@@ -611,12 +611,23 @@ class TwoGateFollower(Node):
     def publish_gate_command(self):
         gate = self.last_gate
 
-        x = float(
-            gate.center.x
+        # Navigation target is ALWAYS the geometric midpoint
+        # of the two currently published gate posts.
+        #
+        # Do not trust a separately tracked/smoothed center for
+        # steering.
+        left_x = float(gate.left_marker.x)
+        left_y = float(gate.left_marker.y)
+
+        right_x = float(gate.right_marker.x)
+        right_y = float(gate.right_marker.y)
+
+        x = 0.5 * (
+            left_x + right_x
         )
 
-        y = float(
-            gate.center.y
+        y = 0.5 * (
+            left_y + right_y
         )
 
         heading_error = math.atan2(
