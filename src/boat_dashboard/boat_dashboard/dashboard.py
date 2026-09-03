@@ -1483,8 +1483,6 @@ class DashboardNode(Node):
 
         can_enable = (
             connected
-            and gate_fresh
-            and control_ready
             and bridge_alive
             and self.control_state not in (
                 'ENABLED',
