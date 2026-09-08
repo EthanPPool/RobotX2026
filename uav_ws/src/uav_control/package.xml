@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>uav_control</name>
+  <version>0.3.0</version>
+  <description>Converts mission-level commands into bounded ROS velocity setpoints.</description>
+  <maintainer email="robotxuav@example.com">RobotX UAV Team</maintainer>
+  <license>Apache-2.0</license>
+  <depend>rclpy</depend>
+  <depend>geometry_msgs</depend>
+  <depend>uav_interfaces</depend>
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

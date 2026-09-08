@@ -1,0 +1,118 @@
+RobotX 2026 UAV POR Route Files
+================================
+
+FILES
+-----
+por_route_runner.py
+por_element1_square.launch.py
+por_element2_hourglass.launch.py
+
+IMPORTANT
+---------
+Launching either launch file does NOT arm or move the drone.
+The route starts only after an explicit:
+
+  ros2 service call /por/start std_srvs/srv/Trigger "{}"
+
+Abort:
+
+  ros2 service call /por/abort std_srvs/srv/Trigger "{}"
+
+The runner then requests:
+GUIDED -> ARM -> autonomous takeoff -> route -> return -> LAND.
+
+Before live flight, test with PROPS OFF and confirm all topic/service names.
+
+INSTALL
+-------
+1. Copy files:
+
+  cp por_route_runner.py ~/uav_ws/src/uav_vehicle/uav_vehicle/
+  cp por_element1_square.launch.py ~/uav_ws/src/uav_bringup/launch/
+  cp por_element2_hourglass.launch.py ~/uav_ws/src/uav_bringup/launch/
+
+2. Register the executable in:
+   ~/uav_ws/src/uav_vehicle/setup.py
+
+Inside entry_points / console_scripts add:
+
+  'por_route_runner = uav_vehicle.por_route_runner:main',
+
+3. Ensure uav_vehicle/package.xml has these runtime dependencies (they are
+   likely already present because the current bridge/vehicle manager use them):
+
+  <depend>geometry_msgs</depend>
+  <depend>mavros_msgs</depend>
+  <depend>std_srvs</depend>
+
+4. Build:
+
+  cd ~/uav_ws
+  source /opt/ros/kilted/setup.bash
+  colcon build --symlink-install --packages-select uav_vehicle uav_bringup
+  source install/setup.bash
+
+5. With MAVROS already running and connected, verify the real names:
+
+  ros2 topic list | grep -E 'state|local_position|setpoint_position'
+  ros2 service list | grep -E 'arming|set_mode|takeoff'
+
+The supplied defaults match the nested MAVROS namespace observed on this
+aircraft:
+  /mavros/mavros/state
+  /mavros/mavros/local_position/pose
+  /mavros/mavros/setpoint_position/local
+  /mavros/mavros/cmd/arming
+  /mavros/mavros/set_mode
+  /mavros/mavros/cmd/takeoff
+
+If your service/topic list differs, edit the parameters in the launch files
+(or override them with ROS parameters).
+
+PROPLESS TEST
+-------------
+Terminal 1: run MAVROS using the currently working UART configuration.
+
+Terminal 2:
+  source /opt/ros/kilted/setup.bash
+  source ~/uav_ws/install/setup.bash
+  ros2 launch uav_bringup por_element1_square.launch.py
+
+Terminal 3:
+  source /opt/ros/kilted/setup.bash
+  source ~/uav_ws/install/setup.bash
+  ros2 service call /por/start std_srvs/srv/Trigger "{}"
+
+For a PROPLESS test, do not allow a real takeoff/route sequence to proceed.
+Use this stage only to verify the node launches, topics/services resolve,
+and /por/abort works. The first actual autonomous route test should follow
+the team's normal flight-test progression and use the dedicated safety pilot.
+
+ROUTE ORIENTATION
+-----------------
+Before /por/start:
+- Place the aircraft at START/END.
+- Point the nose AWAY from the pilot/flight line.
+- The runner captures that heading and rotates the route relative to it.
+- It holds the initial yaw for the route.
+
+ELEMENT #1 GEOMETRY
+-------------------
+The four route points form a 10 m x 10 m square. The near edge is 5 m in
+front of START/END. The handbook labels all square edges 10 m but does not
+dimension the START/END standoff, so 5 m is a configurable implementation
+choice.
+
+ELEMENT #2 GEOMETRY
+-------------------
+The handbook shows the hour-glass route but does not publish metric
+dimensions. The included offsets are a practical visual match, NOT an
+official dimension set. Adjust them if RoboNation provides clarification.
+
+ALTITUDE CONFLICT
+-----------------
+The August 7, 2026 handbook text requires takeoff ABOVE 3 m AGL, while the
+flight-pattern graphic says establish a hover at 2-3 m. These files default
+to 3.5 m to satisfy the explicit "above 3 m" criterion. Confirm with
+RoboNation before recording the final submission if no clarification is
+published.

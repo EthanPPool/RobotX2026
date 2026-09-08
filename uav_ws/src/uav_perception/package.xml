@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>uav_perception</name>
+  <version>0.3.0</version>
+  <description>Target interface and software-only mock perception for the UAV.</description>
+  <maintainer email="robotxuav@example.com">RobotX UAV Team</maintainer>
+  <license>Apache-2.0</license>
+  <depend>rclpy</depend>
+  <depend>geometry_msgs</depend>
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

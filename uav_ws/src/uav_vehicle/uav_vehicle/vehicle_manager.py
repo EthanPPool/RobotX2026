@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+import time
+from typing import Optional, Tuple
+
+import rclpy
+from mavros_msgs.msg import State
+from mavros_msgs.srv import CommandBool, CommandTOL, SetMode
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.node import Node
+from std_srvs.srv import Trigger
+from uav_interfaces.msg import SafetyStatus
+from uav_interfaces.srv import SetFlightMode, Takeoff
+
+
+class VehicleManager(Node):
+    """Safety-aware ArduCopter command-management facade.
+
+    The node exposes stable /vehicle/* services while the underlying endpoints
+    remain MAVROS services. Real-hardware command execution is disabled by
+    default through ``command_execution_enabled``. The software-test config
+    explicitly enables it because those endpoints are provided by mock_mavros.
+    """
+
+    def __init__(self) -> None:
+        super().__init__('vehicle_manager')
+        self.cb_group = ReentrantCallbackGroup()
+
+        self.declare_parameter('state_topic', '/mavros/state')
+        self.declare_parameter('safety_status_topic', '/vehicle/safety_status')
+        self.declare_parameter('arming_service', '/mavros/cmd/arming')
+        self.declare_parameter('set_mode_service', '/mavros/set_mode')
+        self.declare_parameter('takeoff_service', '/mavros/cmd/takeoff')
+        self.declare_parameter('command_execution_enabled', False)
+        self.declare_parameter('service_timeout', 2.0)
+        self.declare_parameter('safety_timeout', 0.75)
+        self.declare_parameter('guided_mode', 'GUIDED')
+        self.declare_parameter('land_mode', 'LAND')
+        self.declare_parameter('rtl_mode', 'RTL')
+        self.declare_parameter('allowed_requested_modes', ['GUIDED', 'LAND', 'RTL', 'LOITER'])
+        self.declare_parameter('minimum_takeoff_altitude', 1.0)
+        self.declare_parameter('maximum_takeoff_altitude', 5.0)
+
+        self.state: Optional[State] = None
+        self.safety: Optional[SafetyStatus] = None
+        self.state_rx = None
+        self.safety_rx = None
+
+        self.state_topic = str(self.get_parameter('state_topic').value)
+        self.safety_topic = str(self.get_parameter('safety_status_topic').value)
+        self.service_timeout = float(self.get_parameter('service_timeout').value)
+        self.safety_timeout = float(self.get_parameter('safety_timeout').value)
+        self.guided_mode = str(self.get_parameter('guided_mode').value).upper()
+        self.land_mode = str(self.get_parameter('land_mode').value).upper()
+        self.rtl_mode = str(self.get_parameter('rtl_mode').value).upper()
+        self.allowed_requested_modes = {
+            str(mode).upper() for mode in self.get_parameter('allowed_requested_modes').value
+        }
+        self.min_takeoff_altitude = float(
+            self.get_parameter('minimum_takeoff_altitude').value)
+        self.max_takeoff_altitude = float(
+            self.get_parameter('maximum_takeoff_altitude').value)
+
+        self.create_subscription(
+            State, self.state_topic, self._state_cb, 10, callback_group=self.cb_group)
+        self.create_subscription(
+            SafetyStatus, self.safety_topic, self._safety_cb, 10,
+            callback_group=self.cb_group)
+
+        self.arming_client = self.create_client(
+            CommandBool, str(self.get_parameter('arming_service').value),
+            callback_group=self.cb_group)
+        self.mode_client = self.create_client(
+            SetMode, str(self.get_parameter('set_mode_service').value),
+            callback_group=self.cb_group)
+        self.takeoff_client = self.create_client(
+            CommandTOL, str(self.get_parameter('takeoff_service').value),
+            callback_group=self.cb_group)
+
+        self.create_service(
+            Trigger, '/vehicle/arm', self._arm_cb, callback_group=self.cb_group)
+        self.create_service(
+            Trigger, '/vehicle/disarm', self._disarm_cb, callback_group=self.cb_group)
+        self.create_service(
+            SetFlightMode, '/vehicle/set_mode', self._set_mode_cb,
+            callback_group=self.cb_group)
+        self.create_service(
+            Takeoff, '/vehicle/takeoff', self._takeoff_cb,
+            callback_group=self.cb_group)
+        self.create_service(
+            Trigger, '/vehicle/land', self._land_cb, callback_group=self.cb_group)
+        self.create_service(
+            Trigger, '/vehicle/rtl', self._rtl_cb, callback_group=self.cb_group)
+
+        self.get_logger().warn(
+            'Vehicle manager ready. Real command execution is controlled by the '
+            'command_execution_enabled parameter; default is FALSE in autonomy.yaml.')
+
+    def _state_cb(self, msg: State) -> None:
+        self.state = msg
+        self.state_rx = self.get_clock().now()
+
+    def _safety_cb(self, msg: SafetyStatus) -> None:
+        self.safety = msg
+        self.safety_rx = self.get_clock().now()
+
+    def _execution_enabled(self) -> bool:
+        return bool(self.get_parameter('command_execution_enabled').value)
+
+    def _fresh(self, stamp, timeout: float) -> bool:
+        if stamp is None:
+            return False
+        return ((self.get_clock().now() - stamp).nanoseconds / 1e9) <= timeout
+
+    def _base_command_check(self) -> Tuple[bool, str]:
+        if not self._execution_enabled():
+            return False, 'vehicle command execution is disabled by parameter'
+        if self.state is None or not self._fresh(self.state_rx, self.safety_timeout):
+            return False, 'MAVROS state missing/stale'
+        if not self.state.connected:
+            return False, 'MAVROS disconnected'
+        return True, 'connected'
+
+    def _safety_check(self, require_prearm: bool = False,
+                      require_flight: bool = False) -> Tuple[bool, str]:
+        if self.safety is None or not self._fresh(self.safety_rx, self.safety_timeout):
+            return False, 'safety status missing/stale'
+        if self.safety.failsafe_latched:
+            return False, f'safety FAILSAFE: {self.safety.reason}'
+        if require_flight and not self.safety.flight_ready:
+            return False, f'flight prerequisites not ready: {self.safety.reason}'
+        if require_prearm and not self.safety.prearm_ready:
+            return False, f'pre-arm prerequisites not ready: {self.safety.reason}'
+        return True, 'safety ready'
+
+    def _wait_service(self, client, label: str) -> Tuple[bool, str]:
+        if client.wait_for_service(timeout_sec=self.service_timeout):
+            return True, ''
+        return False, f'{label} MAVROS service unavailable'
+
+    def _call(self, client, request, label: str):
+        ok, reason = self._wait_service(client, label)
+        if not ok:
+            return None, reason
+        future = client.call_async(request)
+        deadline = time.monotonic() + self.service_timeout
+        while time.monotonic() < deadline:
+            if future.done():
+                try:
+                    return future.result(), ''
+                except Exception as exc:  # pragma: no cover - transport-specific
+                    return None, f'{label} service exception: {exc}'
+            time.sleep(0.01)
+        return None, f'{label} service timed out'
+
+    def _arm_cb(self, request, response):
+        del request
+        ok, reason = self._base_command_check()
+        if not ok:
+            response.success = False; response.message = reason; return response
+        ok, reason = self._safety_check(require_prearm=True)
+        if not ok:
+            response.success = False; response.message = reason; return response
+        if self.state.armed:
+            response.success = True; response.message = 'Vehicle already armed.'; return response
+        if str(self.state.mode).upper() != self.guided_mode:
+            response.success = False
+            response.message = f'Arm rejected: current mode must be {self.guided_mode}.'
+            return response
+
+        req = CommandBool.Request(); req.value = True
+        result, error = self._call(self.arming_client, req, 'arming')
+        response.success = bool(result is not None and result.success)
+        response.message = (
+            'Arm command accepted by MAVROS.' if response.success
+            else error or f'Arm command rejected; MAV_RESULT={getattr(result, "result", -1)}')
+        return response
+
+    def _disarm_cb(self, request, response):
+        """Fail-safe, idempotent vehicle disarm.
+
+        Always send a real disarm request to MAVROS. Do not trust the cached
+        armed state and do not gate disarming on autonomy/safety authorization.
+        """
+        del request
+
+        req = CommandBool.Request()
+        req.value = False
+
+        result, error = self._call(
+            self.arming_client,
+            req,
+            'disarming'
+        )
+
+        response.success = bool(
+            result is not None and result.success
+        )
+
+        response.message = (
+            'Disarm command accepted by MAVROS.'
+            if response.success
+            else error
+            or f'Disarm command rejected; MAV_RESULT={getattr(result, "result", -1)}'
+        )
+
+        return response
+
+    def _request_mode(self, mode: str) -> Tuple[bool, str]:
+        mode = mode.strip().upper()
+        if mode not in self.allowed_requested_modes:
+            return False, f'Mode {mode!r} not permitted by vehicle_manager configuration.'
+        ok, reason = self._base_command_check()
+        if not ok:
+            return False, reason
+
+        req = SetMode.Request(); req.base_mode = 0; req.custom_mode = mode
+        result, error = self._call(self.mode_client, req, f'set_mode({mode})')
+        if result is None:
+            return False, error
+        if not result.mode_sent:
+            return False, f'MAVROS did not send mode {mode}.'
+        return True, f'Mode {mode} command sent.'
+
+    def _set_mode_cb(self, request, response):
+        response.success, response.message = self._request_mode(request.mode)
+        return response
+
+    def _takeoff_cb(self, request, response):
+        altitude = float(request.altitude)
+        ok, reason = self._base_command_check()
+        if not ok:
+            response.success = False; response.message = reason; return response
+        ok, reason = self._safety_check(require_flight=True)
+        if not ok:
+            response.success = False; response.message = reason; return response
+        if str(self.state.mode).upper() != self.guided_mode:
+            response.success = False
+            response.message = f'Takeoff requires {self.guided_mode} mode.'
+            return response
+        if not self.state.armed:
+            response.success = False; response.message = 'Takeoff requires armed=true.'; return response
+        if altitude < self.min_takeoff_altitude or altitude > self.max_takeoff_altitude:
+            response.success = False
+            response.message = (
+                f'Takeoff altitude must be between {self.min_takeoff_altitude:.1f} and '
+                f'{self.max_takeoff_altitude:.1f} m.')
+            return response
+
+        req = CommandTOL.Request()
+        req.min_pitch = 0.0
+        req.yaw = 0.0
+        req.latitude = 0.0
+        req.longitude = 0.0
+        req.altitude = altitude
+        result, error = self._call(self.takeoff_client, req, 'takeoff')
+        response.success = bool(result is not None and result.success)
+        response.message = (
+            f'Takeoff command to {altitude:.1f} m accepted by MAVROS.'
+            if response.success else
+            error or f'Takeoff rejected; MAV_RESULT={getattr(result, "result", -1)}')
+        return response
+
+    def _land_cb(self, request, response):
+        del request
+        response.success, response.message = self._request_mode(self.land_mode)
+        return response
+
+    def _rtl_cb(self, request, response):
+        del request
+        response.success, response.message = self._request_mode(self.rtl_mode)
+        return response
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = VehicleManager()
+    executor = MultiThreadedExecutor(num_threads=4)
+    executor.add_node(node)
+    try:
+        executor.spin()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        executor.shutdown()
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()

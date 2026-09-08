@@ -1,0 +1,281 @@
+#!/usr/bin/env python3
+import math
+from typing import Dict, Optional, Tuple
+
+import rclpy
+from geometry_msgs.msg import PoseStamped
+from mavros_msgs.msg import State
+from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
+from sensor_msgs.msg import BatteryState, NavSatFix, NavSatStatus
+from std_srvs.srv import Trigger
+from uav_interfaces.msg import AutonomyStatus, MissionCommand, SafetyStatus
+
+
+class SafetySupervisor(Node):
+    """Consolidate UAV readiness into a latched safety state.
+
+    v0.3 separates pre-arm readiness from flight readiness. ``READY`` means the
+    telemetry, navigation, battery, mode, mission, and command-path prerequisites
+    are healthy enough to allow an explicit arm request. ``flight_ready`` adds
+    the requirement that the flight controller reports the vehicle armed.
+
+    If a flight prerequisite is lost while autonomy is enabled, FAILSAFE is
+    latched. Recovery requires autonomy disabled, healthy pre-arm prerequisites,
+    and an explicit /safety/reset_failsafe call.
+    """
+
+    def __init__(self) -> None:
+        super().__init__('safety_supervisor')
+
+        self.declare_parameter('state_topic', '/mavros/state')
+        self.declare_parameter('battery_topic', '/mavros/battery')
+        self.declare_parameter('gps_topic', '/mavros/global_position/raw/fix')
+        self.declare_parameter('local_position_topic', '/mavros/local_position/pose')
+        self.declare_parameter('autonomy_status_topic', '/vehicle/autonomy_status')
+        self.declare_parameter('mission_command_topic', '/mission/command')
+        self.declare_parameter('safety_status_topic', '/vehicle/safety_status')
+
+        self.declare_parameter('allowed_modes', ['GUIDED'])
+        self.declare_parameter('minimum_battery_percentage', 0.20)
+        self.declare_parameter('telemetry_timeout', 0.75)
+        self.declare_parameter('mission_timeout', 0.75)
+        self.declare_parameter('publish_rate', 10.0)
+
+        self.allowed_modes = [
+            str(mode).upper() for mode in self.get_parameter('allowed_modes').value
+        ]
+        self.minimum_battery_percentage = float(
+            self.get_parameter('minimum_battery_percentage').value)
+        self.telemetry_timeout = float(self.get_parameter('telemetry_timeout').value)
+        self.mission_timeout = float(self.get_parameter('mission_timeout').value)
+
+        self.state_msg: Optional[State] = None
+        self.battery_msg: Optional[BatteryState] = None
+        self.gps_msg: Optional[NavSatFix] = None
+        self.local_position_msg: Optional[PoseStamped] = None
+        self.autonomy_msg: Optional[AutonomyStatus] = None
+        self.mission_msg: Optional[MissionCommand] = None
+
+        self.rx_times: Dict[str, object] = {}
+        self.failsafe_latched = False
+        self.failsafe_reason = ''
+        self.last_state = SafetyStatus.INIT
+
+        self.create_subscription(
+            State, str(self.get_parameter('state_topic').value),
+            lambda msg: self._store('state', msg), 10)
+        self.create_subscription(
+            BatteryState, str(self.get_parameter('battery_topic').value),
+            lambda msg: self._store('battery', msg), qos_profile_sensor_data)
+        self.create_subscription(
+            NavSatFix, str(self.get_parameter('gps_topic').value),
+            lambda msg: self._store('gps', msg), qos_profile_sensor_data)
+        self.create_subscription(
+            PoseStamped, str(self.get_parameter('local_position_topic').value),
+            lambda msg: self._store('local_position', msg), qos_profile_sensor_data)
+        self.create_subscription(
+            AutonomyStatus, str(self.get_parameter('autonomy_status_topic').value),
+            lambda msg: self._store('autonomy', msg), 10)
+        self.create_subscription(
+            MissionCommand, str(self.get_parameter('mission_command_topic').value),
+            lambda msg: self._store('mission', msg), 10)
+
+        self.pub = self.create_publisher(
+            SafetyStatus, str(self.get_parameter('safety_status_topic').value), 10)
+        self.reset_srv = self.create_service(
+            Trigger, '/safety/reset_failsafe', self._reset_failsafe)
+
+        rate = max(1.0, float(self.get_parameter('publish_rate').value))
+        self.timer = self.create_timer(1.0 / rate, self._tick)
+        self.get_logger().info(
+            'Safety supervisor v0.3 initialized: READY means safe to arm; '
+            'flight_ready additionally requires armed=true.')
+
+    def _store(self, key: str, msg) -> None:
+        setattr(self, f'{key}_msg', msg)
+        self.rx_times[key] = self.get_clock().now()
+
+    def _fresh(self, key: str, timeout: float) -> bool:
+        stamp = self.rx_times.get(key)
+        if stamp is None:
+            return False
+        age = (self.get_clock().now() - stamp).nanoseconds / 1e9
+        return age <= timeout
+
+    def _battery_percentage(self) -> float:
+        if self.battery_msg is None:
+            return float('nan')
+        return float(self.battery_msg.percentage)
+
+    def _autonomy_enabled(self) -> bool:
+        return bool(self.autonomy_msg.autonomy_enabled) if self.autonomy_msg else False
+
+    def _evaluate(self) -> Tuple[Dict[str, bool], bool, float]:
+        state_fresh = self._fresh('state', self.telemetry_timeout)
+        battery_fresh = self._fresh('battery', self.telemetry_timeout)
+        gps_fresh = self._fresh('gps', self.telemetry_timeout)
+        local_fresh = self._fresh('local_position', self.telemetry_timeout)
+        autonomy_fresh = self._fresh('autonomy', self.telemetry_timeout)
+        mission_fresh = self._fresh('mission', self.mission_timeout)
+
+        battery_percentage = self._battery_percentage()
+        battery_valid = (
+            battery_fresh
+            and math.isfinite(battery_percentage)
+            and battery_percentage >= self.minimum_battery_percentage
+        )
+
+        gps_valid = (
+            gps_fresh
+            and self.gps_msg is not None
+            and int(self.gps_msg.status.status) >= int(NavSatStatus.STATUS_FIX)
+        )
+
+        mode = str(self.state_msg.mode).upper() if self.state_msg is not None else ''
+        base_checks = {
+            'MAVROS state stale/missing': state_fresh,
+            'MAVROS disconnected': bool(self.state_msg.connected) if state_fresh else False,
+            f'flight mode {mode!r} not allowed': mode in self.allowed_modes if state_fresh else False,
+            'GPS invalid/stale': gps_valid,
+            'local position stale/missing': local_fresh,
+            'battery low/invalid/stale': battery_valid,
+            'autonomy status stale/missing': autonomy_fresh,
+            'mission command stale/missing': mission_fresh,
+        }
+        armed = bool(self.state_msg.armed) if state_fresh else False
+        return base_checks, armed, battery_percentage
+
+    @staticmethod
+    def _first_failure(checks: Dict[str, bool]) -> str:
+        for reason, passed in checks.items():
+            if not passed:
+                return reason
+        return 'all prerequisites satisfied'
+
+    def _reset_failsafe(self, request, response):
+        del request
+        base_checks, _, _ = self._evaluate()
+        prearm_ready = all(base_checks.values())
+
+        if self._autonomy_enabled():
+            response.success = False
+            response.message = (
+                'Cannot reset FAILSAFE while autonomy is enabled. Disable autonomy first.')
+            return response
+        if not prearm_ready:
+            response.success = False
+            response.message = 'Cannot reset FAILSAFE: ' + self._first_failure(base_checks)
+            return response
+
+        self.failsafe_latched = False
+        self.failsafe_reason = ''
+        response.success = True
+        response.message = 'FAILSAFE latch cleared; supervisor may return to READY.'
+        self.get_logger().warn(response.message)
+        return response
+
+    def _transition_log(self, new_state: int, reason: str) -> None:
+        if new_state == self.last_state:
+            return
+        labels = {
+            SafetyStatus.INIT: 'INIT',
+            SafetyStatus.NOT_READY: 'NOT_READY',
+            SafetyStatus.READY: 'READY',
+            SafetyStatus.ACTIVE: 'ACTIVE',
+            SafetyStatus.FAILSAFE: 'FAILSAFE',
+        }
+        previous = labels.get(self.last_state, str(self.last_state))
+        current = labels.get(new_state, str(new_state))
+        if new_state == SafetyStatus.FAILSAFE:
+            self.get_logger().error(f'Safety state {previous} -> {current}: {reason}')
+        else:
+            self.get_logger().warn(f'Safety state {previous} -> {current}: {reason}')
+        self.last_state = new_state
+
+    def _tick(self) -> None:
+        base_checks, armed, battery_percentage = self._evaluate()
+        prearm_ready = all(base_checks.values())
+        flight_ready = prearm_ready and armed
+        autonomy_enabled = self._autonomy_enabled()
+
+        essential_received = all(
+            key in self.rx_times
+            for key in ('state', 'battery', 'gps', 'local_position', 'autonomy', 'mission')
+        )
+
+        first_base_failure = self._first_failure(base_checks)
+        active_failure = first_base_failure if not prearm_ready else 'vehicle not armed'
+
+        if self.failsafe_latched:
+            state = SafetyStatus.FAILSAFE
+            reason = self.failsafe_reason or active_failure
+        elif not essential_received:
+            state = SafetyStatus.INIT
+            reason = first_base_failure
+        elif autonomy_enabled and not flight_ready:
+            self.failsafe_latched = True
+            self.failsafe_reason = active_failure
+            state = SafetyStatus.FAILSAFE
+            reason = self.failsafe_reason
+        elif autonomy_enabled and flight_ready:
+            state = SafetyStatus.ACTIVE
+            reason = 'autonomy active; all flight prerequisites satisfied'
+        elif prearm_ready:
+            state = SafetyStatus.READY
+            reason = (
+                'ready to arm / accept vehicle commands'
+                if not armed else 'ready; vehicle armed and autonomy disabled')
+        else:
+            state = SafetyStatus.NOT_READY
+            reason = first_base_failure
+
+        self._transition_log(state, reason)
+
+        msg = SafetyStatus()
+        msg.stamp = self.get_clock().now().to_msg()
+        msg.state = state
+        labels = {
+            SafetyStatus.INIT: 'INIT',
+            SafetyStatus.NOT_READY: 'NOT_READY',
+            SafetyStatus.READY: 'READY',
+            SafetyStatus.ACTIVE: 'ACTIVE',
+            SafetyStatus.FAILSAFE: 'FAILSAFE',
+        }
+        msg.state_label = labels.get(state, 'UNKNOWN')
+        msg.prearm_ready = prearm_ready and not self.failsafe_latched
+        msg.flight_ready = flight_ready and not self.failsafe_latched
+        msg.ready = msg.prearm_ready
+        msg.failsafe_latched = self.failsafe_latched
+        msg.autonomy_enabled = autonomy_enabled
+
+        state_fresh = self._fresh('state', self.telemetry_timeout)
+        msg.mavros_state_fresh = state_fresh
+        msg.mavros_connected = bool(self.state_msg.connected) if state_fresh else False
+        msg.armed = bool(self.state_msg.armed) if state_fresh else False
+        current_mode = str(self.state_msg.mode).upper() if state_fresh else ''
+        msg.mode_allowed = current_mode in self.allowed_modes
+        msg.gps_valid = base_checks['GPS invalid/stale']
+        msg.local_position_valid = base_checks['local position stale/missing']
+        msg.battery_valid = base_checks['battery low/invalid/stale']
+        msg.battery_percentage = (
+            float(battery_percentage) if math.isfinite(battery_percentage) else -1.0)
+        msg.mission_healthy = base_checks['mission command stale/missing']
+        msg.reason = reason
+        self.pub.publish(msg)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = SafetySupervisor()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,7 @@
+# Apply this after MAVROS is launched or merge it into your MAVROS config.
+# The autonomy stack publishes velocity in ROS base_link FLU coordinates
+# (x forward, y left, z up). MAVROS converts those correctly when the
+# setpoint_velocity plugin uses BODY_NED.
+/**/setpoint_velocity:
+  ros__parameters:
+    mav_frame: BODY_NED

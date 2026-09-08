@@ -1,0 +1,9 @@
+builtin_interfaces/Time stamp
+bool autonomy_enabled
+bool mavros_state_received
+bool mavros_connected
+bool armed
+string mode
+bool command_fresh
+bool authorized
+string reason
