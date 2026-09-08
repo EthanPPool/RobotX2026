@@ -1,5 +1,0 @@
-# Loaded after MAVROS apm_config.yaml when MAVROS is started by boat_vehicle.
-# This makes velocity setpoints body-relative for local LiDAR navigation.
-/**/setpoint_velocity:
-  ros__parameters:
-    mav_frame: "BODY_NED"
