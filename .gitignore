@@ -1,4 +1,3 @@
-
 # ROS 2 / colcon
 **/build/
 **/install/
@@ -26,18 +25,3 @@ rosbag2_*/
 *.tmp
 *.bak
 *~
-
-
-# ROS 2 / colcon generated files
-build/
-install/
-log/
-
-# Python generated files
-__pycache__/
-*.pyc
-
-# VS Code generated cache/database
-.vscode/browse.vc.db
-.vscode/browse.vc.db*
-.vscode/ipch/
