@@ -1,0 +1,12 @@
+target_controller:
+  ros__parameters:
+    target_topic: "/mission/target"
+    cmd_topic: "/control/cmd_vel"
+
+    yaw_kp: 0.90
+    max_yaw_rate: 0.45
+    max_forward_speed: 0.55
+    target_timeout: 0.50
+
+    # Stop translating if target is mostly sideways; rotate first.
+    stop_forward_angle: 1.20

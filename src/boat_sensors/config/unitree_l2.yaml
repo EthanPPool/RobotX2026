@@ -1,0 +1,22 @@
+unitree_lidar_ros2_node:
+  ros__parameters:
+    # Existing tested network configuration.
+    lidar_ip: "192.168.1.62"
+    lidar_port: 6101
+    local_ip: "192.168.1.2"
+    local_port: 6201
+
+    cloud_topic: "unilidar/cloud"
+    imu_topic: "unilidar/imu"
+
+    # Make the driver use the same physical frame name as the URDF.
+    cloud_frame: "lidar_link"
+    # L2 IMU is not used by BOAT_WSv0.2 PoR logic. Keep its vendor frame separate.
+    imu_frame: "unilidar_imu"
+
+    cloud_scan_num: 18
+    range_min: 0.0
+    range_max: 100.0
+
+    serial_port: "/dev/ttyACM0"
+    initialize_type: 2

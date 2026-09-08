@@ -1,0 +1,50 @@
+pointcloud_to_laserscan:
+  ros__parameters:
+    target_frame: "base_link"
+    transform_tolerance: 0.05
+
+    # Initial PoR slice: tune outdoors after inspecting the L2 cloud.
+    min_height: -0.20
+    max_height: 1.50
+
+    angle_min: -1.57079632679
+    angle_max: 1.57079632679
+    angle_increment: 0.00872664626
+    scan_time: 0.055
+
+    range_min: 0.50
+    range_max: 30.0
+    use_inf: true
+
+buoy_detector:
+  ros__parameters:
+    scan_topic: "/perception/scan"
+    objects_topic: "/perception/objects"
+    markers_topic: "/perception/object_markers"
+
+    min_range: 0.75
+    max_range: 25.0
+    cluster_join_distance: 0.45
+    min_cluster_points: 2
+    min_cluster_width: 0.03
+    max_cluster_width: 0.90
+    max_cluster_depth: 0.90
+
+    # Confidence is geometric only in v0.2; no camera/color classifier is used.
+    nominal_buoy_width: 0.35
+
+gate_detector:
+  ros__parameters:
+    objects_topic: "/perception/objects"
+    gate_topic: "/perception/gate"
+    markers_topic: "/perception/gate_markers"
+
+    # RobotX PoR gate is roughly 1.83-3.05 m. These margins are intentionally wider
+    # for first-pass LiDAR uncertainty/course setup tolerance and must be tuned.
+    gate_width_min: 1.65
+    gate_width_max: 3.25
+    gate_depth_tolerance: 1.20
+    min_gate_x: 0.60
+    max_gate_x: 25.0
+    centerline_weight: 1.50
+    depth_weight: 0.50

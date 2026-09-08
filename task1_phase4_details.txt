@@ -1,0 +1,766 @@
+=== REMAINING NODE INFO ===
+  Service Servers:
+    /boat_dashboard/describe_parameters: rcl_interfaces/srv/DescribeParameters
+    /boat_dashboard/get_parameter_types: rcl_interfaces/srv/GetParameterTypes
+    /boat_dashboard/get_parameters: rcl_interfaces/srv/GetParameters
+    /boat_dashboard/get_type_description: type_description_interfaces/srv/GetTypeDescription
+    /boat_dashboard/list_parameters: rcl_interfaces/srv/ListParameters
+    /boat_dashboard/set_parameters: rcl_interfaces/srv/SetParameters
+    /boat_dashboard/set_parameters_atomically: rcl_interfaces/srv/SetParametersAtomically
+  Service Clients:
+    /control/reset_mission: std_srvs/srv/Trigger
+    /mavros/cmd/arming: mavros_msgs/srv/CommandBool
+    /mavros/set_mode: mavros_msgs/srv/SetMode
+    /vehicle/set_autonomy: std_srvs/srv/SetBool
+    /vehicle/software_estop: std_srvs/srv/SetBool
+  Action Servers:
+
+  Action Clients:
+
+=== PARAMETERS ===
+
+--- /unitree_lidar_ros2_node ---
+  baudrate
+  cloud_frame
+  cloud_scan_num
+  cloud_topic
+  imu_frame
+  imu_topic
+  initialize_type
+  lidar_ip
+  lidar_port
+  local_ip
+  local_port
+  qos_overrides./parameter_events.publisher.depth
+  qos_overrides./parameter_events.publisher.durability
+  qos_overrides./parameter_events.publisher.history
+  qos_overrides./parameter_events.publisher.reliability
+  qos_overrides./tf.publisher.depth
+  qos_overrides./tf.publisher.durability
+  qos_overrides./tf.publisher.history
+  qos_overrides./tf.publisher.reliability
+  range_max
+  range_min
+  serial_port
+  start_type_description_service
+  use_sim_time
+  use_system_timestamp
+  work_mode
+
+--- /pointcloud_to_laserscan ---
+  angle_increment
+  angle_max
+  angle_min
+  inf_epsilon
+  max_height
+  min_height
+  qos_overrides./parameter_events.publisher.depth
+  qos_overrides./parameter_events.publisher.durability
+  qos_overrides./parameter_events.publisher.history
+  qos_overrides./parameter_events.publisher.reliability
+  queue_size
+  range_max
+  range_min
+  scan_time
+  start_type_description_service
+  target_frame
+  transform_tolerance
+  use_inf
+  use_sim_time
+
+--- /buoy_detector ---
+  association_distance
+  association_distance_per_meter
+  cluster_gap_base
+  cluster_gap_per_meter
+  confirm_hits
+  good_cluster_points
+  good_convexity
+  good_pca_ratio
+  markers_topic
+  max_bearing_deg
+  max_cluster_depth
+  max_cluster_width
+  max_lateral
+  max_radial_span
+  max_range
+  max_track_misses
+  min_candidate_confidence
+  min_cluster_points
+  min_cluster_width
+  min_forward_x
+  min_pca_ratio
+  min_range
+  nominal_buoy_width
+  objects_topic
+  publish_misses
+  scan_topic
+  size_tolerance
+  start_type_description_service
+  track_alpha
+  use_sim_time
+
+--- /gate_detector ---
+  center_association_distance
+  center_association_per_meter
+  confirm_hits
+  gate_topic
+  gate_width_tolerance
+  marker_topic
+  max_center_x
+  max_depth_difference
+  max_gate_skew_deg
+  max_gate_width
+  max_misses
+  min_buoy_confidence
+  min_center_x
+  min_gate_confidence
+  min_gate_width
+  min_lateral_fraction
+  nominal_gate_width
+  objects_topic
+  start_type_description_service
+  track_alpha
+  use_sim_time
+  width_association_tolerance
+
+--- /two_gate_follower ---
+  enabled
+  forward_angle_limit_deg
+  forward_speed
+  gate_timeout
+  gate_topic
+  gates_required
+  max_yaw_rate
+  min_gate_confidence
+  output_topic
+  pass_jump_distance
+  pass_loss_timeout
+  pass_min_travel
+  passage_arm_distance
+  start_type_description_service
+  state_topic
+  use_sim_time
+  yaw_kp
+
+--- /mavros_command_bridge ---
+  allowed_modes
+  autonomy_enabled
+  battery_critical_duration
+  battery_critical_voltage
+  battery_required_for_propulsion
+  battery_timeout
+  battery_topic
+  battery_warning_voltage
+  deadman_timeout
+  hold_retry_period
+  initial_command_timeout
+  input_topic
+  low_voltage_latched
+  manual_control_topic
+  max_forward_speed
+  max_yaw_rate
+  mission_state_topic
+  operator_input_topic
+  operator_manual_axis_max
+  operator_mode
+  operator_mode_retry_period
+  operator_timeout
+  output_topic
+  publish_rate
+  set_mode_service
+  shutdown_hold_timeout
+  software_estop
+  start_type_description_service
+  state_topic
+  stop_custom_mode
+  stop_mode
+  use_sim_time
+  zero_command_epsilon
+
+--- /esp32_status_bridge ---
+  baud_rate
+  send_period
+  serial_port
+  start_type_description_service
+  use_sim_time
+
+--- /boat_dashboard ---
+  gate_timeout
+  min_gate_confidence
+  port
+  start_type_description_service
+  use_sim_time
+=== TOPIC TYPES AND QOS ===
+
+--- /unilidar/cloud ---
+Type: sensor_msgs/msg/PointCloud2
+
+Publisher count: 1
+
+Node name: unitree_lidar_ros2_node
+Node namespace: /
+Topic type: sensor_msgs/msg/PointCloud2
+Topic type hash: RIHS01_9198cabf7da3796ae6fe19c4cb3bdd3525492988c70522628af5daa124bae2b5
+Endpoint type: PUBLISHER
+GID: 01.0f.7e.6e.99.ad.9f.12.00.00.00.00.00.00.14.03
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 1
+
+Node name: pointcloud_to_laserscan
+Node namespace: /
+Topic type: sensor_msgs/msg/PointCloud2
+Topic type hash: RIHS01_9198cabf7da3796ae6fe19c4cb3bdd3525492988c70522628af5daa124bae2b5
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.7e.6e.9a.ad.6d.af.00.00.00.00.00.00.19.04
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (6)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+--- /perception/scan ---
+Type: sensor_msgs/msg/LaserScan
+
+Publisher count: 1
+
+Node name: pointcloud_to_laserscan
+Node namespace: /
+Topic type: sensor_msgs/msg/LaserScan
+Topic type hash: RIHS01_64c191398013af96509d518dac71d5164f9382553fce5c1f8cca5be7924bd828
+Endpoint type: PUBLISHER
+GID: 01.0f.7e.6e.9a.ad.6d.af.00.00.00.00.00.00.13.03
+QoS profile:
+  Reliability: BEST_EFFORT
+  History (Depth): KEEP_LAST (5)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 1
+
+Node name: buoy_detector
+Node namespace: /
+Topic type: sensor_msgs/msg/LaserScan
+Topic type hash: RIHS01_64c191398013af96509d518dac71d5164f9382553fce5c1f8cca5be7924bd828
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.7e.6e.9b.ad.a6.27.00.00.00.00.00.00.15.04
+QoS profile:
+  Reliability: BEST_EFFORT
+  History (Depth): KEEP_LAST (5)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+--- /perception/objects ---
+Type: boat_interfaces/msg/DetectedObjectArray
+
+Publisher count: 1
+
+Node name: buoy_detector
+Node namespace: /
+Topic type: boat_interfaces/msg/DetectedObjectArray
+Topic type hash: RIHS01_460fd268b2cc19b90a46ffe2197db0015f76d020da6476588ee1c73f891fe5b6
+Endpoint type: PUBLISHER
+GID: 01.0f.7e.6e.9b.ad.a6.27.00.00.00.00.00.00.13.03
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 2
+
+Node name: gate_detector
+Node namespace: /
+Topic type: boat_interfaces/msg/DetectedObjectArray
+Topic type hash: RIHS01_460fd268b2cc19b90a46ffe2197db0015f76d020da6476588ee1c73f891fe5b6
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.7e.6e.9c.ad.f1.7c.00.00.00.00.00.00.15.04
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: boat_dashboard
+Node namespace: /
+Topic type: boat_interfaces/msg/DetectedObjectArray
+Topic type hash: RIHS01_460fd268b2cc19b90a46ffe2197db0015f76d020da6476588ee1c73f891fe5b6
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.7e.6e.a0.ad.b4.93.00.00.00.00.00.00.15.04
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+--- /perception/gate ---
+Type: boat_interfaces/msg/Gate
+
+Publisher count: 1
+
+Node name: gate_detector
+Node namespace: /
+Topic type: boat_interfaces/msg/Gate
+Topic type hash: RIHS01_cb91fb4a004cfa669409dcb273772e7d8d9e9aeaf6df61400515cb6a9e369991
+Endpoint type: PUBLISHER
+GID: 01.0f.7e.6e.9c.ad.f1.7c.00.00.00.00.00.00.13.03
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 2
+
+Node name: two_gate_follower
+Node namespace: /
+Topic type: boat_interfaces/msg/Gate
+Topic type hash: RIHS01_cb91fb4a004cfa669409dcb273772e7d8d9e9aeaf6df61400515cb6a9e369991
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.7e.6e.9d.ad.d2.33.00.00.00.00.00.00.15.04
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: boat_dashboard
+Node namespace: /
+Topic type: boat_interfaces/msg/Gate
+Topic type hash: RIHS01_cb91fb4a004cfa669409dcb273772e7d8d9e9aeaf6df61400515cb6a9e369991
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.7e.6e.a0.ad.b4.93.00.00.00.00.00.00.16.04
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+--- /mavros/local_position/pose ---
+Type: geometry_msgs/msg/PoseStamped
+
+Publisher count: 1
+
+Node name: local_position
+Node namespace: /mavros
+Topic type: geometry_msgs/msg/PoseStamped
+Topic type hash: RIHS01_10f3786d7d40fd2b54367835614bff85d4ad3b5dab62bf8bca0cc232d73b4cd8
+Endpoint type: PUBLISHER
+GID: 01.0f.7e.6e.9e.ad.15.53.00.00.00.00.00.01.f1.03
+QoS profile:
+  Reliability: BEST_EFFORT
+  History (Depth): KEEP_LAST (5)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 2
+
+Node name: two_gate_follower
+Node namespace: /
+Topic type: geometry_msgs/msg/PoseStamped
+Topic type hash: RIHS01_10f3786d7d40fd2b54367835614bff85d4ad3b5dab62bf8bca0cc232d73b4cd8
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.7e.6e.9d.ad.d2.33.00.00.00.00.00.00.18.04
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: setpoint_position
+Node namespace: /mavros
+Topic type: geometry_msgs/msg/PoseStamped
+Topic type hash: RIHS01_10f3786d7d40fd2b54367835614bff85d4ad3b5dab62bf8bca0cc232d73b4cd8
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.7e.6e.9e.ad.15.53.00.00.00.00.00.03.73.04
+QoS profile:
+  Reliability: BEST_EFFORT
+  History (Depth): KEEP_LAST (5)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+--- /mavros/state ---
+Type: mavros_msgs/msg/State
+
+Publisher count: 1
+
+Node name: sys
+Node namespace: /mavros
+Topic type: mavros_msgs/msg/State
+Topic type hash: RIHS01_11ba7686163d22281871f1cb42557e8957407469b0be813bdb1a8922c66e3131
+Endpoint type: PUBLISHER
+GID: 01.0f.7e.6e.9e.ad.15.53.00.00.00.00.00.03.d5.03
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: TRANSIENT_LOCAL
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 5
+
+Node name: two_gate_follower
+Node namespace: /
+Topic type: mavros_msgs/msg/State
+Topic type hash: RIHS01_11ba7686163d22281871f1cb42557e8957407469b0be813bdb1a8922c66e3131
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.7e.6e.9d.ad.d2.33.00.00.00.00.00.00.16.04
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: two_gate_follower
+Node namespace: /
+Topic type: mavros_msgs/msg/State
+Topic type hash: RIHS01_11ba7686163d22281871f1cb42557e8957407469b0be813bdb1a8922c66e3131
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.7e.6e.9d.ad.d2.33.00.00.00.00.00.00.17.04
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: mavros_command_bridge
+Node namespace: /
+Topic type: mavros_msgs/msg/State
+Topic type hash: RIHS01_11ba7686163d22281871f1cb42557e8957407469b0be813bdb1a8922c66e3131
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.7e.6e.9f.ad.ec.c5.00.00.00.00.00.00.17.04
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: boat_dashboard
+Node namespace: /
+Topic type: mavros_msgs/msg/State
+Topic type hash: RIHS01_11ba7686163d22281871f1cb42557e8957407469b0be813bdb1a8922c66e3131
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.7e.6e.a0.ad.b4.93.00.00.00.00.00.00.13.04
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: esp32_status_bridge
+Node namespace: /
+Topic type: mavros_msgs/msg/State
+Topic type hash: RIHS01_11ba7686163d22281871f1cb42557e8957407469b0be813bdb1a8922c66e3131
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.7e.6e.a1.ad.dd.f3.00.00.00.00.00.00.13.04
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+--- /control/cmd_vel ---
+Type: geometry_msgs/msg/TwistStamped
+
+Publisher count: 1
+
+Node name: two_gate_follower
+Node namespace: /
+Topic type: geometry_msgs/msg/TwistStamped
+Topic type hash: RIHS01_5f0fcd4f81d5d06ad9b4c4c63e3ea51b82d6ae4d0558f1d475229b1121db6f64
+Endpoint type: PUBLISHER
+GID: 01.0f.7e.6e.9d.ad.d2.33.00.00.00.00.00.00.13.03
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 2
+
+Node name: mavros_command_bridge
+Node namespace: /
+Topic type: geometry_msgs/msg/TwistStamped
+Topic type hash: RIHS01_5f0fcd4f81d5d06ad9b4c4c63e3ea51b82d6ae4d0558f1d475229b1121db6f64
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.7e.6e.9f.ad.ec.c5.00.00.00.00.00.00.15.04
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: boat_dashboard
+Node namespace: /
+Topic type: geometry_msgs/msg/TwistStamped
+Topic type hash: RIHS01_5f0fcd4f81d5d06ad9b4c4c63e3ea51b82d6ae4d0558f1d475229b1121db6f64
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.7e.6e.a0.ad.b4.93.00.00.00.00.00.00.17.04
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+--- /mission/state ---
+Type: std_msgs/msg/String
+
+Publisher count: 1
+
+Node name: two_gate_follower
+Node namespace: /
+Topic type: std_msgs/msg/String
+Topic type hash: RIHS01_df668c740482bbd48fb39d76a70dfd4bd59db1288021743503259e948f6b1a18
+Endpoint type: PUBLISHER
+GID: 01.0f.7e.6e.9d.ad.d2.33.00.00.00.00.00.00.14.03
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 1
+
+Node name: mavros_command_bridge
+Node namespace: /
+Topic type: std_msgs/msg/String
+Topic type hash: RIHS01_df668c740482bbd48fb39d76a70dfd4bd59db1288021743503259e948f6b1a18
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.7e.6e.9f.ad.ec.c5.00.00.00.00.00.00.18.04
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+--- /operator/cmd_vel ---
+Type: geometry_msgs/msg/TwistStamped
+
+Publisher count: 1
+
+Node name: boat_dashboard
+Node namespace: /
+Topic type: geometry_msgs/msg/TwistStamped
+Topic type hash: RIHS01_5f0fcd4f81d5d06ad9b4c4c63e3ea51b82d6ae4d0558f1d475229b1121db6f64
+Endpoint type: PUBLISHER
+GID: 01.0f.7e.6e.a0.ad.b4.93.00.00.00.00.00.00.19.03
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 1
+
+Node name: mavros_command_bridge
+Node namespace: /
+Topic type: geometry_msgs/msg/TwistStamped
+Topic type hash: RIHS01_5f0fcd4f81d5d06ad9b4c4c63e3ea51b82d6ae4d0558f1d475229b1121db6f64
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.7e.6e.9f.ad.ec.c5.00.00.00.00.00.00.16.04
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+--- /operator/deadman ---
+Type: std_msgs/msg/Bool
+
+Publisher count: 1
+
+Node name: boat_dashboard
+Node namespace: /
+Topic type: std_msgs/msg/Bool
+Topic type hash: RIHS01_feb91e995ff9ebd09c0cb3d2aed18b11077585839fb5db80193b62d74528f6c9
+Endpoint type: PUBLISHER
+GID: 01.0f.7e.6e.a0.ad.b4.93.00.00.00.00.00.00.1a.03
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 1
+
+Node name: mavros_command_bridge
+Node namespace: /
+Topic type: std_msgs/msg/Bool
+Topic type hash: RIHS01_feb91e995ff9ebd09c0cb3d2aed18b11077585839fb5db80193b62d74528f6c9
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.7e.6e.9f.ad.ec.c5.00.00.00.00.00.00.1a.04
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+--- /mavros/setpoint_velocity/cmd_vel ---
+Type: geometry_msgs/msg/TwistStamped
+
+Publisher count: 1
+
+Node name: mavros_command_bridge
+Node namespace: /
+Topic type: geometry_msgs/msg/TwistStamped
+Topic type hash: RIHS01_5f0fcd4f81d5d06ad9b4c4c63e3ea51b82d6ae4d0558f1d475229b1121db6f64
+Endpoint type: PUBLISHER
+GID: 01.0f.7e.6e.9f.ad.ec.c5.00.00.00.00.00.00.13.03
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 2
+
+Node name: setpoint_velocity
+Node namespace: /mavros
+Topic type: geometry_msgs/msg/TwistStamped
+Topic type hash: RIHS01_5f0fcd4f81d5d06ad9b4c4c63e3ea51b82d6ae4d0558f1d475229b1121db6f64
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.7e.6e.9e.ad.15.53.00.00.00.00.00.03.ae.04
+QoS profile:
+  Reliability: BEST_EFFORT
+  History (Depth): KEEP_LAST (5)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: boat_dashboard
+Node namespace: /
+Topic type: geometry_msgs/msg/TwistStamped
+Topic type hash: RIHS01_5f0fcd4f81d5d06ad9b4c4c63e3ea51b82d6ae4d0558f1d475229b1121db6f64
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.7e.6e.a0.ad.b4.93.00.00.00.00.00.00.18.04
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+=== FRAME AND QOS SOURCE REFERENCES ===
+src/boat_perception/boat_perception/buoy_detector.py:8:from rclpy.qos import qos_profile_sensor_data
+src/boat_perception/boat_perception/buoy_detector.py:169:            qos_profile_sensor_data
+src/boat_perception/boat_perception/gate_detector.py:186:        gate.header.frame_id = 'base_link'
+src/boat_perception/config/lidar_perception.yaml:3:    target_frame: "base_link"
+src/boat_perception/config/lidar_perception.yaml.pre_robust_backup:3:    target_frame: "base_link"
+src/boat_control/boat_control/target_controller.py:41:        cmd.header.frame_id = 'base_link'
+src/boat_control/boat_control/simple_gate_follower.py:191:        cmd.header.frame_id = 'base_link'
+src/boat_control/boat_control/simple_gate_follower.py:278:        cmd.header.frame_id = 'base_link'
+src/boat_control/boat_control/two_gate_follower.py:504:        msg.header.frame_id = 'base_link'
+src/boat_control/boat_control/two_gate_follower.py:557:        msg.header.frame_id = 'base_link'
+src/boat_vehicle/config/mavros_overrides.yaml:5:    mav_frame: "BODY_NED"
+src/boat_vehicle/boat_vehicle/mavros_command_bridge.py:13:from rclpy.qos import qos_profile_sensor_data
+src/boat_vehicle/boat_vehicle/mavros_command_bridge.py:325:            qos_profile_sensor_data
+src/boat_vehicle/boat_vehicle/mavros_command_bridge.py:1041:        out.header.frame_id = 'base_link'
+src/boat_vehicle/boat_vehicle/mavros_command_bridge.py:1697:            out.header.frame_id = 'base_link'
+src/boat_vehicle/boat_vehicle/mavros_command_bridge.py:1718:        out.header.frame_id = 'base_link'
+src/boat_vehicle/boat_vehicle/mavros_command_bridge.py.bak:69:        out.header.frame_id = 'base_link'
+src/boat_sensors/config/unitree_l2.yaml:13:    cloud_frame: "lidar_link"

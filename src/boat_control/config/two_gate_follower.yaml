@@ -1,0 +1,25 @@
+two_gate_follower:
+  ros__parameters:
+    gate_topic: "/perception/gate"
+    output_topic: "/control/cmd_vel"
+    state_topic: "/mission/state"
+    vehicle_state_topic: "/mavros/state"
+    local_position_topic: "/mavros/local_position/pose"
+
+    enabled: true
+    gates_required: 2
+    min_gate_confidence: 0.75
+    gate_timeout: 0.30
+
+    forward_speed: 0.12
+    yaw_kp: 0.60
+    max_yaw_rate: 0.12
+    forward_angle_limit_deg: 20.0
+
+    passage_arm_distance: 2.0
+    pass_close_distance: 1.3
+    pass_min_gate_approach: 0.50
+    pass_close_confirm_hits: 3
+    pass_loss_timeout: 0.40
+    pass_jump_distance: 0.40
+    pass_min_travel: 0.75
