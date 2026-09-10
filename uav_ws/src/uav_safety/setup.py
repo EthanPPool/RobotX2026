@@ -19,6 +19,7 @@ setup(
     entry_points={
         'console_scripts': [
             'safety_supervisor = uav_safety.safety_supervisor:main',
+            'uav_geofence = uav_safety.geofence_monitor:main',
         ],
     },
 )
