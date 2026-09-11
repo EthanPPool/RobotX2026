@@ -6,12 +6,6 @@ import time
 
 
 class VehicleManager:
-    """
-    Central vehicle-state store for the RobotX ground station.
-
-    During the transport refactor, dashboard.py and the future
-    vehicle clients share this same state dictionary.
-    """
 
     def __init__(self, vehicle_specs, lock=None):
 
@@ -31,6 +25,11 @@ class VehicleManager:
                 "name": spec["name"],
                 "type": spec["type"],
 
+                # Ground-station <-> vehicle transport
+                "vehicle_link": False,
+                "vehicle_link_last_rx": None,
+
+                # Autopilot / MAVROS state
                 "connected": False,
                 "armed": False,
                 "mode": "UNKNOWN",
@@ -100,48 +99,94 @@ class VehicleManager:
                 )
 
             state = self.vehicles[vehicle_id]
+            now = time.monotonic()
+
+            # ------------------------------------------------
+            # Normal telemetry fields
+            # ------------------------------------------------
 
             for key, value in fields.items():
+
+                if key in (
+                    "battery_age_sec",
+                    "gate_age_sec",
+                    "bridge_age_sec",
+                ):
+                    continue
 
                 if key in state:
                     state[key] = value
 
-            # All freshness timestamps are generated on the
-            # ground station. Never compare monotonic clocks
-            # from two different computers.
-            now = time.monotonic()
+            # ------------------------------------------------
+            # Vehicle transport freshness
+            # ------------------------------------------------
 
+            state["vehicle_link"] = True
+            state["vehicle_link_last_rx"] = now
             state["last_rx"] = now
 
-            if any(
-                key in fields
-                for key in (
-                    "voltage",
-                    "battery_percent",
-                    "battery_current",
-                    "battery_remaining",
-                )
-            ):
-                state["battery_last_rx"] = now
+            # ------------------------------------------------
+            # Source-specific ROS freshness
+            #
+            # Jetson sends source ages, not its monotonic clock.
+            # Reconstruct equivalent local timestamps here.
+            # ------------------------------------------------
 
-            if any(
-                key in fields
-                for key in (
-                    "gate_confidence",
-                    "gate_x",
-                    "gate_y",
-                )
-            ):
-                state["gate_last_rx"] = now
+            battery_age = fields.get(
+                "battery_age_sec"
+            )
 
-            if any(
-                key in fields
-                for key in (
-                    "bridge_forward",
-                    "bridge_yaw",
+            if battery_age is None:
+                state["battery_last_rx"] = None
+            else:
+                state["battery_last_rx"] = (
+                    now - max(
+                        0.0,
+                        float(battery_age),
+                    )
                 )
-            ):
-                state["bridge_last_rx"] = now
+
+            gate_age = fields.get(
+                "gate_age_sec"
+            )
+
+            if gate_age is None:
+                state["gate_last_rx"] = None
+            else:
+                state["gate_last_rx"] = (
+                    now - max(
+                        0.0,
+                        float(gate_age),
+                    )
+                )
+
+            bridge_age = fields.get(
+                "bridge_age_sec"
+            )
+
+            if bridge_age is None:
+                state["bridge_last_rx"] = None
+            else:
+                state["bridge_last_rx"] = (
+                    now - max(
+                        0.0,
+                        float(bridge_age),
+                    )
+                )
+
+    def mark_link_offline(
+        self,
+        vehicle_id,
+    ):
+
+        with self.lock:
+
+            if vehicle_id not in self.vehicles:
+                return
+
+            self.vehicles[
+                vehicle_id
+            ]["vehicle_link"] = False
 
     def snapshot_raw(self):
 

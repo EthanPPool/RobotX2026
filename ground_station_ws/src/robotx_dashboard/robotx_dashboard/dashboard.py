@@ -18,6 +18,7 @@ from std_srvs.srv import SetBool, Trigger
 
 from boat_interfaces.msg import DetectedObjectArray, Gate
 from robotx_dashboard.vehicle_manager import VehicleManager
+from robotx_dashboard.clients.boat_client import BoatClient
 
 
 # ============================================================
@@ -1458,7 +1459,38 @@ class RobotXDashboard(Node):
         # and frontend behavior continue using self.vehicles.
         self.vehicles = self.vehicle_manager.vehicles
 
+        # ----------------------------------------------------
+        # Remote vehicle transports
+        # ----------------------------------------------------
+        #
+        # BlueBoat telemetry is received from the Jetson over
+        # TCP instead of requiring this ground station to join
+        # the Jetson's ROS 2 DDS graph.
+        self.boat_client = BoatClient(
+            "boat",
+            self.vehicle_manager.update_vehicle,
+            host="192.168.2.20",
+            port=8765,
+        )
+
+        self.vehicle_manager.register_client(
+            "boat",
+            self.boat_client,
+        )
+
+        self.boat_client.start()
+
         for vehicle_id, spec in VEHICLES.items():
+
+            # BlueBoat telemetry now arrives through BoatClient
+            # over TCP from the Jetson-side dashboard bridge.
+            # Do not join the BlueBoat ROS 2 graph from Beeptop.
+            if vehicle_id == "boat":
+                self.get_logger().info(
+                    "Monitoring USV via TCP bridge "
+                    "at 192.168.2.20:8765"
+                )
+                continue
 
             prefix = spec["mavros"].rstrip("/")
 
@@ -1572,6 +1604,14 @@ class RobotXDashboard(Node):
         )
 
         self.register_control_routes()
+
+
+    def destroy_node(self):
+
+        if hasattr(self, "boat_client"):
+            self.boat_client.stop()
+
+        return super().destroy_node()
 
 
     # ========================================================
@@ -1928,10 +1968,38 @@ class RobotXDashboard(Node):
 
                 data["age_sec"] = age
 
+                # Existing "online" continues to mean that the
+                # autopilot/MAVROS state is connected and fresh.
                 data["online"] = bool(
                     data["connected"]
                     and age is not None
                     and age < 2.0
+                )
+
+                vehicle_link_rx = data.pop(
+                    "vehicle_link_last_rx",
+                    None
+                )
+
+                vehicle_link_age = (
+                    None
+                    if vehicle_link_rx is None
+                    else now - vehicle_link_rx
+                )
+
+                data[
+                    "vehicle_link_age_sec"
+                ] = vehicle_link_age
+
+                data["vehicle_link"] = bool(
+                    data.get(
+                        "vehicle_link",
+                        False,
+                    )
+                    and
+                    vehicle_link_age is not None
+                    and
+                    vehicle_link_age < 2.0
                 )
 
                 battery_rx = data.pop(

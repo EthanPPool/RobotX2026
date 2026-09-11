@@ -176,6 +176,29 @@ class BoatClient(BaseVehicleClient):
                 self.connected = False
                 self._close_socket()
 
+                # Explicitly tell VehicleManager that the
+                # transport disappeared.
+                try:
+                    owner = getattr(
+                        self.state_update_callback,
+                        "__self__",
+                        None,
+                    )
+
+                    if (
+                        owner is not None
+                        and hasattr(
+                            owner,
+                            "mark_link_offline",
+                        )
+                    ):
+                        owner.mark_link_offline(
+                            self.vehicle_id
+                        )
+
+                except Exception:
+                    pass
+
                 self._fail_pending(
                     "BlueBoat connection lost"
                 )
