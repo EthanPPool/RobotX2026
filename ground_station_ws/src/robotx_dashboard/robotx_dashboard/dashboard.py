@@ -11,10 +11,8 @@ from rclpy.node import Node
 
 from geometry_msgs.msg import TwistStamped
 from mavros_msgs.msg import State, SysStatus
-from mavros_msgs.srv import CommandBool, SetMode
 from sensor_msgs.msg import BatteryState, Imu, NavSatFix
 from std_msgs.msg import String
-from std_srvs.srv import SetBool, Trigger
 
 from boat_interfaces.msg import DetectedObjectArray, Gate
 from robotx_dashboard.vehicle_manager import VehicleManager
@@ -1445,8 +1443,6 @@ class RobotXDashboard(Node):
         # Dashboard-side record of the control sequence.
         # The Jetson bridge remains the actual propulsion
         # authorization boundary.
-        self.control_state = "BOOT SAFE"
-        self.software_stop_state = "UNKNOWN"
 
         self.vehicle_manager = VehicleManager(
             VEHICLES,
@@ -1471,6 +1467,7 @@ class RobotXDashboard(Node):
             self.vehicle_manager.update_vehicle,
             host="192.168.2.20",
             port=8765,
+            command_timeout=10.0,
         )
 
         self.vehicle_manager.register_client(
@@ -1578,30 +1575,10 @@ class RobotXDashboard(Node):
         # USV control service clients
         # ----------------------------------------------------
 
-        self.estop_client = self.create_client(
-            SetBool,
-            "/vehicle/software_estop"
-        )
 
-        self.autonomy_client = self.create_client(
-            SetBool,
-            "/vehicle/set_autonomy"
-        )
 
-        self.arm_client = self.create_client(
-            CommandBool,
-            "/mavros/cmd/arming"
-        )
 
-        self.mode_client = self.create_client(
-            SetMode,
-            "/mavros/set_mode"
-        )
 
-        self.reset_client = self.create_client(
-            Trigger,
-            "/control/reset_mission"
-        )
 
         self.register_control_routes()
 
@@ -1624,12 +1601,21 @@ class RobotXDashboard(Node):
 
             success, message = func()
 
+            status = self.usv_status()
+
             return jsonify({
                 "success": bool(success),
                 "message": str(message),
-                "control_state": self.control_state,
+                "control_state":
+                    status.get(
+                        "control_state",
+                        "UNKNOWN",
+                    ),
                 "software_stop":
-                    self.software_stop_state,
+                    status.get(
+                        "software_stop",
+                        "UNKNOWN",
+                    ),
             })
 
         app.add_url_rule(
@@ -1717,15 +1703,6 @@ class RobotXDashboard(Node):
             )
 
             self.touch(vehicle_id)
-
-        if (
-            vehicle_id == "boat"
-            and bool(msg.armed)
-            and str(msg.mode).upper() == "GUIDED"
-            and self.control_state
-                == "AUTONOMY READY / DISARMED"
-        ):
-            self.control_state = "ENABLED"
 
 
     def gps_callback(self, vehicle_id, msg):
@@ -2061,52 +2038,38 @@ class RobotXDashboard(Node):
 
                 if vehicle_id == "boat":
 
-                    mode = str(
-                        data["mode"]
-                    ).upper()
-
-                    bridge_alive = bool(
-                        self.estop_client
-                            .service_is_ready()
-                        and
-                        self.autonomy_client
-                            .service_is_ready()
+                    # The Jetson bridge owns USV control and
+                    # safety state. Beeptop only presents it.
+                    data["bridge_alive"] = bool(
+                        data.get(
+                            "bridge_alive",
+                            False,
+                        )
                     )
 
-                    data["bridge_alive"] = (
-                        bridge_alive
+                    if not data["online"]:
+                        data["control_state"] = "OFFLINE"
+
+                    data["software_stop"] = str(
+                        data.get(
+                            "software_stop",
+                            "UNKNOWN",
+                        )
                     )
 
-                    data["control_state"] = (
-                        self.control_state
-                        if data["online"]
-                        else "OFFLINE"
-                    )
-
-                    data[
-                        "software_stop"
-                    ] = self.software_stop_state
-
-                    data[
-                        "autonomy_enabled"
-                    ] = bool(
-                        mode == "GUIDED"
-                        and
-                        self.control_state
-                        in (
-                            "ENABLED",
-                            "AUTONOMY READY / DISARMED",
+                    data["autonomy_enabled"] = bool(
+                        data.get(
+                            "autonomy_enabled",
+                            False,
                         )
                     )
 
                     data["can_enable"] = bool(
-                        data["online"]
-                        and bridge_alive
-                        and self.control_state
-                        not in (
-                            "ENABLED",
-                            "AUTONOMY READY / DISARMED",
+                        data.get(
+                            "can_enable",
+                            False,
                         )
+                        and data["online"]
                     )
 
                 else:
@@ -2131,722 +2094,115 @@ class RobotXDashboard(Node):
     # ROS SERVICE HELPERS
     # ========================================================
 
-    def wait_future(
-        self,
-        future,
-        timeout=2.0
-    ):
-
-        deadline = (
-            time.monotonic() + timeout
-        )
-
-        while (
-            not future.done()
-            and time.monotonic() < deadline
-        ):
-            time.sleep(0.02)
-
-        return future.done()
 
 
-    def call_bool_service(
-        self,
-        client,
-        value,
-        timeout=2.0
-    ):
-
-        if not client.wait_for_service(
-            timeout_sec=0.25
-        ):
-            return (
-                False,
-                "ROS service unavailable"
-            )
-
-        request = SetBool.Request()
-        request.data = bool(value)
-
-        future = client.call_async(
-            request
-        )
-
-        if not self.wait_future(
-            future,
-            timeout
-        ):
-            return (
-                False,
-                "ROS service call timed out"
-            )
-
-        try:
-            response = future.result()
-
-        except Exception as exc:
-            return (
-                False,
-                f"ROS service exception: {exc}"
-            )
-
-        if response is None:
-            return (
-                False,
-                "ROS service returned no response"
-            )
-
-        return (
-            bool(response.success),
-            str(response.message)
-        )
 
 
-    def call_arm_service(
-        self,
-        arm,
-        timeout=3.0
-    ):
-
-        if not self.arm_client.wait_for_service(
-            timeout_sec=0.50
-        ):
-            return (
-                False,
-                "MAVROS arming service unavailable"
-            )
-
-        request = CommandBool.Request()
-        request.value = bool(arm)
-
-        future = self.arm_client.call_async(
-            request
-        )
-
-        if not self.wait_future(
-            future,
-            timeout
-        ):
-            return (
-                False,
-                "Arming service timed out"
-            )
-
-        try:
-            response = future.result()
-
-        except Exception as exc:
-            return (
-                False,
-                f"Arming exception: {exc}"
-            )
-
-        if (
-            response is None
-            or not response.success
-        ):
-            return (
-                False,
-                "Arming rejected"
-            )
-
-        return (
-            True,
-            "ARMED" if arm else "DISARMED"
-        )
 
 
-    def call_mode_service(
-        self,
-        mode,
-        timeout=3.0
-    ):
-
-        if not self.mode_client.wait_for_service(
-            timeout_sec=0.50
-        ):
-            return (
-                False,
-                "MAVROS mode service unavailable"
-            )
-
-        request = SetMode.Request()
-        request.base_mode = 0
-        request.custom_mode = str(mode)
-
-        future = self.mode_client.call_async(
-            request
-        )
-
-        if not self.wait_future(
-            future,
-            timeout
-        ):
-            return (
-                False,
-                "Mode service timed out"
-            )
-
-        response = future.result()
-
-        if (
-            response is None
-            or not response.mode_sent
-        ):
-            return (
-                False,
-                f"Mode {mode} rejected"
-            )
-
-        return (
-            True,
-            f"Mode request sent: {mode}"
-        )
 
 
-    def call_reset_service(
-        self,
-        timeout=2.0
-    ):
-
-        if not self.reset_client.wait_for_service(
-            timeout_sec=0.50
-        ):
-            return (
-                False,
-                "Mission reset service unavailable"
-            )
-
-        request = Trigger.Request()
-
-        future = self.reset_client.call_async(
-            request
-        )
-
-        if not self.wait_future(
-            future,
-            timeout
-        ):
-            return (
-                False,
-                "Mission reset timed out"
-            )
-
-        response = future.result()
-
-        if response is None:
-            return (
-                False,
-                "Mission reset returned no response"
-            )
-
-        return (
-            bool(response.success),
-            str(response.message)
-        )
 
 
     # ========================================================
     # USV CONTROL ACTIONS
     # ========================================================
 
+    def execute_remote_usv_command(
+        self,
+        command,
+    ):
+
+        with self.action_lock:
+
+            if not self.boat_client.connected:
+                return (
+                    False,
+                    "USV command rejected: "
+                    "Jetson TCP link is offline",
+                )
+
+            try:
+                result = self.boat_client.command(
+                    command
+                )
+
+            except Exception as exc:
+                return (
+                    False,
+                    "USV command transport error: "
+                    + str(exc),
+                )
+
+            if not isinstance(result, dict):
+                return (
+                    False,
+                    "Invalid response from Jetson bridge",
+                )
+
+            return (
+                bool(
+                    result.get(
+                        "success",
+                        False,
+                    )
+                ),
+                str(
+                    result.get(
+                        "message",
+                        "No response message",
+                    )
+                ),
+            )
+
+
     def execute_fail_safe_stop(self):
 
-        self.call_bool_service(
-            self.estop_client,
-            True
+        return self.execute_remote_usv_command(
+            "stop"
         )
-
-        self.call_bool_service(
-            self.autonomy_client,
-            False
-        )
-
-        self.software_stop_state = "ENGAGED"
-        self.control_state = "STOPPED / HOLD"
 
 
     def execute_stop(self):
 
-        with self.action_lock:
-
-            messages = []
-            success = True
-
-            ok, msg = self.call_bool_service(
-                self.estop_client,
-                True
-            )
-
-            messages.append(
-                "software_stop: " + msg
-            )
-
-            if ok:
-                self.software_stop_state = (
-                    "ENGAGED"
-                )
-            else:
-                success = False
-
-            ok, msg = self.call_bool_service(
-                self.autonomy_client,
-                False
-            )
-
-            messages.append(
-                "autonomy: " + msg
-            )
-
-            if not ok:
-                success = False
-
-            self.control_state = (
-                "STOPPED / HOLD"
-                if success
-                else "STOP COMMAND FAILED"
-            )
-
-            return (
-                success,
-                " | ".join(messages)
-            )
+        return self.execute_remote_usv_command(
+            "stop"
+        )
 
 
     def execute_clear_stop(self):
 
-        with self.action_lock:
-
-            status = self.usv_status()
-
-            if not status["online"]:
-                return (
-                    False,
-                    "Clear stop rejected: MAVROS "
-                    "is not connected"
-                )
-
-            if status["armed"]:
-                return (
-                    False,
-                    "Clear stop rejected: "
-                    "vehicle is armed"
-                )
-
-            # Autonomy must remain revoked when the
-            # software stop is manually cleared.
-            ok, autonomy_msg = (
-                self.call_bool_service(
-                    self.autonomy_client,
-                    False
-                )
-            )
-
-            if not ok:
-                return (
-                    False,
-                    "Could not verify autonomy OFF: "
-                    + autonomy_msg
-                )
-
-            ok, stop_msg = (
-                self.call_bool_service(
-                    self.estop_client,
-                    False
-                )
-            )
-
-            if not ok:
-                return (
-                    False,
-                    "Could not clear software stop: "
-                    + stop_msg
-                )
-
-            self.software_stop_state = "CLEARED"
-
-            self.control_state = (
-                "STOP CLEARED / AUTONOMY OFF"
-            )
-
-            return (
-                True,
-                "Software stop CLEARED. "
-                "Autonomy remains OFF and "
-                "vehicle remains DISARMED."
-            )
+        return self.execute_remote_usv_command(
+            "clear_stop"
+        )
 
 
     def execute_enable(self):
 
-        with self.action_lock:
-
-            status = self.usv_status()
-
-            if not status["online"]:
-                return (
-                    False,
-                    "Enable rejected: MAVROS is not connected"
-                )
-
-            if not status["gate_fresh"]:
-                return (
-                    False,
-                    "Enable rejected: no fresh "
-                    "high-confidence gate"
-                )
-
-            if not status["control_ready"]:
-                return (
-                    False,
-                    "Enable rejected: follower "
-                    "is commanding STOP"
-                )
-
-            if not status["bridge_alive"]:
-                return (
-                    False,
-                    "Enable rejected: bridge "
-                    "services unavailable"
-                )
-
-            messages = []
-
-            # Start from a known safe state.
-            ok, msg = self.call_bool_service(
-                self.estop_client,
-                True
-            )
-
-            messages.append(
-                "safety: " + msg
-            )
-
-            if not ok:
-                return (
-                    False,
-                    " | ".join(messages)
-                )
-
-            self.software_stop_state = "ENGAGED"
-
-            status = self.usv_status()
-
-            # Never transition an armed USV into GUIDED.
-            if status["armed"]:
-
-                ok, msg = self.call_arm_service(
-                    False
-                )
-
-                messages.append(
-                    "disarm: " + msg
-                )
-
-                if not ok:
-                    return (
-                        False,
-                        " | ".join(messages)
-                    )
-
-                deadline = (
-                    time.monotonic() + 1.5
-                )
-
-                while (
-                    time.monotonic()
-                    < deadline
-                ):
-
-                    state = self.vehicles[
-                        "boat"
-                    ]
-
-                    if not state["armed"]:
-                        break
-
-                    time.sleep(0.02)
-
-                if self.vehicles[
-                    "boat"
-                ]["armed"]:
-
-                    return (
-                        False,
-                        "Enable aborted: USV did "
-                        "not confirm DISARM"
-                    )
-
-            # Clear software stop while still disarmed.
-            ok, msg = self.call_bool_service(
-                self.estop_client,
-                False
-            )
-
-            messages.append(
-                "software_stop: " + msg
-            )
-
-            if not ok:
-                self.execute_fail_safe_stop()
-
-                return (
-                    False,
-                    " | ".join(messages)
-                )
-
-            self.software_stop_state = "CLEARED"
-
-            # Enter GUIDED while still disarmed.
-            ok, msg = self.call_mode_service(
-                "GUIDED"
-            )
-
-            messages.append(
-                "mode: " + msg
-            )
-
-            if not ok:
-                self.execute_fail_safe_stop()
-
-                return (
-                    False,
-                    " | ".join(messages)
-                )
-
-            deadline = (
-                time.monotonic() + 1.5
-            )
-
-            while (
-                time.monotonic() < deadline
-            ):
-
-                state = self.vehicles["boat"]
-
-                if (
-                    str(state["mode"]).upper()
-                    == "GUIDED"
-                ):
-                    break
-
-                time.sleep(0.02)
-
-            state = self.vehicles["boat"]
-
-            if (
-                str(state["mode"]).upper()
-                != "GUIDED"
-            ):
-                self.execute_fail_safe_stop()
-
-                return (
-                    False,
-                    "Enable aborted: GUIDED "
-                    "was not confirmed"
-                )
-
-            if state["armed"]:
-                self.execute_fail_safe_stop()
-
-                return (
-                    False,
-                    "Enable aborted: vehicle "
-                    "unexpectedly armed"
-                )
-
-            previous_bridge_time = (
-                self.vehicles[
-                    "boat"
-                ]["bridge_last_rx"]
-            )
-
-            ok, msg = self.call_bool_service(
-                self.autonomy_client,
-                True
-            )
-
-            messages.append(
-                "autonomy: " + msg
-            )
-
-            if not ok:
-                self.execute_fail_safe_stop()
-
-                return (
-                    False,
-                    " | ".join(messages)
-                )
-
-            deadline = (
-                time.monotonic() + 1.25
-            )
-
-            fresh_bridge = False
-
-            while (
-                time.monotonic() < deadline
-            ):
-
-                current = self.vehicles[
-                    "boat"
-                ]["bridge_last_rx"]
-
-                if (
-                    current is not None
-                    and (
-                        previous_bridge_time
-                            is None
-                        or
-                        current
-                            > previous_bridge_time
-                    )
-                ):
-                    fresh_bridge = True
-                    break
-
-                time.sleep(0.02)
-
-            if not fresh_bridge:
-                self.execute_fail_safe_stop()
-
-                return (
-                    False,
-                    "Enable aborted: bridge "
-                    "did not produce a fresh "
-                    "autonomous setpoint"
-                )
-
-            state = self.vehicles["boat"]
-
-            if (
-                state["armed"]
-                or
-                str(state["mode"]).upper()
-                    != "GUIDED"
-            ):
-                self.execute_fail_safe_stop()
-
-                return (
-                    False,
-                    "Enable aborted: vehicle "
-                    "state changed during preparation"
-                )
-
-            self.control_state = (
-                "AUTONOMY READY / DISARMED"
-            )
-
-            return (
-                True,
-                "Autonomy READY: GUIDED entered "
-                "while DISARMED and fresh autonomous "
-                "setpoints are streaming. "
-                "Press ARM to start propulsion."
-            )
+        return self.execute_remote_usv_command(
+            "enable"
+        )
 
 
     def execute_arm(self):
 
-        with self.action_lock:
-
-            status = self.usv_status()
-
-            if not status["online"]:
-                return (
-                    False,
-                    "ARM rejected: MAVROS "
-                    "is not connected"
-                )
-
-            if (
-                str(status["mode"]).upper()
-                == "GUIDED"
-            ):
-
-                if (
-                    self.control_state
-                        != "AUTONOMY READY / DISARMED"
-                    or
-                    not status[
-                        "bridge_command_active"
-                    ]
-                ):
-                    return (
-                        False,
-                        "ARM rejected: GUIDED requires "
-                        "ENABLE AUTONOMY first"
-                    )
-
-            ok, msg = self.call_arm_service(
-                True
-            )
-
-            if (
-                ok
-                and
-                str(status["mode"]).upper()
-                    == "GUIDED"
-            ):
-                self.control_state = "ENABLED"
-
-            return (
-                ok,
-                msg
-            )
+        return self.execute_remote_usv_command(
+            "arm"
+        )
 
 
     def execute_disarm(self):
 
-        with self.action_lock:
-
-            stop_ok, stop_msg = (
-                self.execute_stop()
-            )
-
-            arm_ok, arm_msg = (
-                self.call_arm_service(
-                    False
-                )
-            )
-
-            self.control_state = (
-                "DISARMED"
-                if arm_ok
-                else "DISARM FAILED"
-            )
-
-            return (
-                stop_ok and arm_ok,
-                stop_msg
-                + " | disarm: "
-                + arm_msg
-            )
+        return self.execute_remote_usv_command(
+            "disarm"
+        )
 
 
     def execute_reset_mission(self):
 
-        with self.action_lock:
-
-            stop_ok, stop_msg = (
-                self.execute_stop()
-            )
-
-            reset_ok, reset_msg = (
-                self.call_reset_service()
-            )
-
-            if reset_ok:
-                self.control_state = (
-                    "MISSION RESET / STOPPED"
-                )
-
-            return (
-                stop_ok and reset_ok,
-                stop_msg
-                + " | reset: "
-                + reset_msg
-            )
+        return self.execute_remote_usv_command(
+            "reset_mission"
+        )
 
 
 app = Flask(__name__)

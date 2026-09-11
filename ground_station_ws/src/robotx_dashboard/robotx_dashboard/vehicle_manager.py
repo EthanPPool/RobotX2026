@@ -62,6 +62,15 @@ class VehicleManager:
                 "bridge_yaw": 0.0,
                 "bridge_last_rx": None,
 
+                # Jetson-side control/safety authority.
+                "bridge_alive": False,
+                "control_ready": False,
+                "bridge_command_active": False,
+                "control_state": "BOOT SAFE",
+                "software_stop": "UNKNOWN",
+                "autonomy_enabled": False,
+                "can_enable": False,
+
                 "last_rx": None,
             }
 
