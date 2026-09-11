@@ -2,6 +2,7 @@
 
 import copy
 import threading
+import time
 
 
 class VehicleManager:
@@ -104,6 +105,43 @@ class VehicleManager:
 
                 if key in state:
                     state[key] = value
+
+            # All freshness timestamps are generated on the
+            # ground station. Never compare monotonic clocks
+            # from two different computers.
+            now = time.monotonic()
+
+            state["last_rx"] = now
+
+            if any(
+                key in fields
+                for key in (
+                    "voltage",
+                    "battery_percent",
+                    "battery_current",
+                    "battery_remaining",
+                )
+            ):
+                state["battery_last_rx"] = now
+
+            if any(
+                key in fields
+                for key in (
+                    "gate_confidence",
+                    "gate_x",
+                    "gate_y",
+                )
+            ):
+                state["gate_last_rx"] = now
+
+            if any(
+                key in fields
+                for key in (
+                    "bridge_forward",
+                    "bridge_yaw",
+                )
+            ):
+                state["bridge_last_rx"] = now
 
     def snapshot_raw(self):
 
