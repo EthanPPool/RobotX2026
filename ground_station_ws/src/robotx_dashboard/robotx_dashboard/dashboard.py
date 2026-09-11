@@ -17,6 +17,7 @@ from std_msgs.msg import String
 from std_srvs.srv import SetBool, Trigger
 
 from boat_interfaces.msg import DetectedObjectArray, Gate
+from robotx_dashboard.vehicle_manager import VehicleManager
 
 
 # ============================================================
@@ -1437,7 +1438,7 @@ class RobotXDashboard(Node):
 
         super().__init__("robotx_dashboard")
 
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.action_lock = threading.RLock()
 
         # Dashboard-side record of the control sequence.
@@ -1446,49 +1447,18 @@ class RobotXDashboard(Node):
         self.control_state = "BOOT SAFE"
         self.software_stop_state = "UNKNOWN"
 
-        self.vehicles = {}
+        self.vehicle_manager = VehicleManager(
+            VEHICLES,
+            lock=self.lock,
+        )
+
+        # Compatibility alias.
+        #
+        # All existing callbacks, snapshot logic, API routes,
+        # and frontend behavior continue using self.vehicles.
+        self.vehicles = self.vehicle_manager.vehicles
 
         for vehicle_id, spec in VEHICLES.items():
-
-            self.vehicles[vehicle_id] = {
-                "id": vehicle_id,
-                "name": spec["name"],
-                "type": spec["type"],
-
-                "connected": False,
-                "armed": False,
-                "mode": "UNKNOWN",
-
-                "latitude": None,
-                "longitude": None,
-                "altitude": None,
-                "heading_deg": None,
-
-                "voltage": None,
-                "battery_percent": None,
-
-                "battery_current": None,
-                "battery_remaining": None,
-                "battery_last_rx": None,
-
-                "buoy_count": 0,
-
-                "gate_confidence": None,
-                "gate_x": None,
-                "gate_y": None,
-                "gate_last_rx": None,
-
-                "control_forward": 0.0,
-                "control_yaw": 0.0,
-
-                "mission_state": None,
-
-                "bridge_forward": 0.0,
-                "bridge_yaw": 0.0,
-                "bridge_last_rx": None,
-
-                "last_rx": None,
-            }
 
             prefix = spec["mavros"].rstrip("/")
 
