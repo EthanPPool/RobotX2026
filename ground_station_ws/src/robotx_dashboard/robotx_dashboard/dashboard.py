@@ -4,7 +4,7 @@ import math
 import threading
 import time
 
-from flask import Flask, jsonify, Response
+from flask import Flask, jsonify, Response, request
 
 import rclpy
 from rclpy.node import Node
@@ -607,8 +607,9 @@ function makeVehiclePage(id, vehicle) {
 
                 <div class="row">
                     <span>Backend</span>
-                    <span class="value">
-                        READ ONLY
+                    <span class="value"
+                          id="${id}-operator-backend">
+                        WAITING
                     </span>
                 </div>
             </div>
@@ -1356,6 +1357,216 @@ async function toggleUsvStop(input) {
 }
 
 
+
+const GAMEPAD_DEADZONE = 0.12;
+const GAMEPAD_PERIOD_MS = 50;
+
+let operatorPostBusy = false;
+
+
+function applyGamepadDeadzone(value) {
+
+    value = Number(value) || 0.0;
+
+    const magnitude = Math.abs(value);
+
+    if (magnitude <= GAMEPAD_DEADZONE) {
+        return 0.0;
+    }
+
+    const scaled =
+        (magnitude - GAMEPAD_DEADZONE)
+        / (1.0 - GAMEPAD_DEADZONE);
+
+    return Math.sign(value) * scaled;
+}
+
+
+function findOperatorGamepad() {
+
+    if (!navigator.getGamepads) {
+        return null;
+    }
+
+    const pads = navigator.getGamepads();
+
+    for (const pad of pads) {
+
+        if (
+            pad
+            && pad.connected
+            && pad.mapping === "standard"
+        ) {
+            return pad;
+        }
+    }
+
+    for (const pad of pads) {
+
+        if (pad && pad.connected) {
+            return pad;
+        }
+    }
+
+    return null;
+}
+
+
+function setControllerValue(
+    id,
+    text,
+    state
+) {
+
+    const element =
+        document.getElementById(id);
+
+    if (!element) {
+        return;
+    }
+
+    element.textContent = text;
+
+    element.className =
+        "value "
+        + (
+            state === true
+                ? "connected"
+                : state === false
+                    ? "disconnected"
+                    : ""
+        );
+}
+
+
+async function updateGamepad() {
+
+    const pad = findOperatorGamepad();
+
+    const connected = !!pad;
+
+    let deadman = false;
+    let forward = 0.0;
+    let yaw = 0.0;
+
+
+    if (pad) {
+
+        const leftX =
+            applyGamepadDeadzone(
+                pad.axes[0] || 0.0
+            );
+
+        const leftY =
+            applyGamepadDeadzone(
+                pad.axes[1] || 0.0
+            );
+
+        // Standard Gamepad mapping:
+        // button 4 = Xbox LB.
+        deadman = !!(
+            pad.buttons[4]
+            && pad.buttons[4].pressed
+        );
+
+        if (deadman) {
+
+            // Browser axis 1 is negative forward.
+            forward = -leftY;
+
+            // Positive X = right.
+            yaw = leftX;
+        }
+    }
+
+
+    setControllerValue(
+        "boat-gamepad",
+        connected
+            ? "CONNECTED"
+            : "DISCONNECTED",
+        connected
+    );
+
+    setControllerValue(
+        "boat-deadman",
+        deadman
+            ? "HELD"
+            : "RELEASED",
+        deadman ? true : null
+    );
+
+    setText(
+        "boat-operator-forward",
+        `${(forward * 0.15).toFixed(3)} m/s`
+    );
+
+    setText(
+        "boat-operator-yaw",
+        `${(yaw * 0.15).toFixed(3)} rad/s`
+    );
+
+
+    if (operatorPostBusy) {
+        return;
+    }
+
+    operatorPostBusy = true;
+
+    try {
+
+        const response = await fetch(
+            "/api/operator_input",
+            {
+                method: "POST",
+                cache: "no-store",
+                headers: {
+                    "Content-Type":
+                        "application/json"
+                },
+                body: JSON.stringify({
+                    connected: connected,
+                    deadman: deadman,
+                    forward: forward,
+                    yaw: yaw
+                })
+            }
+        );
+
+        const result =
+            await response.json();
+
+        setControllerValue(
+            "boat-operator-backend",
+            result.success
+                ? "RECEIVING"
+                : "REJECTED",
+            result.success
+        );
+
+    } catch (error) {
+
+        setControllerValue(
+            "boat-operator-backend",
+            "LOST",
+            false
+        );
+
+    } finally {
+
+        operatorPostBusy = false;
+    }
+}
+
+
+setInterval(
+    updateGamepad,
+    GAMEPAD_PERIOD_MS
+);
+
+updateGamepad();
+
+
 async function refresh() {
 
     try {
@@ -1617,6 +1828,32 @@ class RobotXDashboard(Node):
                         "UNKNOWN",
                     ),
             })
+
+        def operator_input():
+
+            data = request.get_json(
+                silent=True
+            ) or {}
+
+            if not isinstance(data, dict):
+                return jsonify({
+                    "success": False,
+                    "message": "Invalid operator input",
+                })
+
+            result = (
+                self.boat_client
+                .send_operator_input(data)
+            )
+
+            return jsonify(result)
+
+        app.add_url_rule(
+            "/api/operator_input",
+            endpoint="operator_input",
+            view_func=operator_input,
+            methods=["POST"],
+        )
 
         app.add_url_rule(
             "/api/usv/arm",

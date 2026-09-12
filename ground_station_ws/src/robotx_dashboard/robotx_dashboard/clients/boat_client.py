@@ -60,6 +60,33 @@ class BoatClient(BaseVehicleClient):
 
         self.connected = False
 
+    def send_operator_input(self, data):
+        if not self.connected:
+            return {
+                "success": False,
+                "message": "BlueBoat transport is offline",
+            }
+
+        try:
+            self._send({
+                "type": "operator_input",
+                "data": dict(data or {}),
+            })
+
+        except Exception as exc:
+            return {
+                "success": False,
+                "message": (
+                    "Operator input send failed: "
+                    + str(exc)
+                ),
+            }
+
+        return {
+            "success": True,
+            "message": "operator input sent",
+        }
+
     def command(self, command, data=None):
         if not self.connected:
             return {
