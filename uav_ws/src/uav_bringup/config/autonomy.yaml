@@ -5,7 +5,7 @@ vehicle_manager:
     arming_service: /mavros/cmd/arming
     set_mode_service: /mavros/set_mode
     takeoff_service: /mavros/cmd/takeoff
-    command_execution_enabled: false
+    command_execution_enabled: true
     service_timeout: 2.0
     safety_timeout: 2.0
     guided_mode: GUIDED
