@@ -1037,6 +1037,121 @@ function makeVehiclePage(id, vehicle) {
 
 
             <div class="card">
+                <h2>Pre-Arm Checks</h2>
+
+                <div class="row">
+                    <span>MAVROS State Fresh</span>
+                    <span class="value"
+                          id="${id}-check-state-fresh">
+                        FALSE
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>MAVROS Connected</span>
+                    <span class="value"
+                          id="${id}-check-mavros-connected">
+                        FALSE
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Flight Mode Allowed</span>
+                    <span class="value"
+                          id="${id}-check-mode-allowed">
+                        FALSE
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>GPS Valid</span>
+                    <span class="value"
+                          id="${id}-check-gps-valid">
+                        FALSE
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Local Position Fresh</span>
+                    <span class="value"
+                          id="${id}-check-local-position">
+                        FALSE
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Battery Valid</span>
+                    <span class="value"
+                          id="${id}-check-battery-valid">
+                        FALSE
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Safety Battery Level</span>
+                    <span class="value"
+                          id="${id}-check-battery-percent">
+                        --
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Autonomy Status Fresh</span>
+                    <span class="value"
+                          id="${id}-check-autonomy-fresh">
+                        FALSE
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Mission Command Fresh</span>
+                    <span class="value"
+                          id="${id}-check-mission-healthy">
+                        FALSE
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Failsafe Clear</span>
+                    <span class="value"
+                          id="${id}-check-failsafe-clear">
+                        TRUE
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Pre-Arm Ready</span>
+                    <span class="value"
+                          id="${id}-check-prearm-ready">
+                        FALSE
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>RC / Manual Input (info)</span>
+                    <span class="value"
+                          id="${id}-check-manual-input">
+                        FALSE
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Blocking Reason</span>
+                    <span class="value"
+                          id="${id}-check-reason"
+                          style="
+                              max-width:60%;
+                              text-align:right;
+                              overflow-wrap:anywhere;
+                          ">
+                        --
+                    </span>
+                </div>
+
+            </div>
+
+
+            <div class="card">
                 <h2>Autonomy</h2>
 
                 <div class="row">
@@ -1369,6 +1484,36 @@ function setText(id, value) {
 }
 
 
+function setBooleanCheck(
+    id,
+    value,
+    invert = false
+) {
+    const element =
+        document.getElementById(id);
+
+    if (!element) {
+        return;
+    }
+
+    const result =
+        invert
+            ? !Boolean(value)
+            : Boolean(value);
+
+    element.textContent =
+        result ? "TRUE" : "FALSE";
+
+    element.className =
+        "value "
+        + (
+            result
+                ? "connected"
+                : "disconnected"
+        );
+}
+
+
 function updateVehicle(id, vehicle) {
 
     if (!vehiclePages[id]) {
@@ -1665,6 +1810,77 @@ function updateVehicle(id, vehicle) {
             vehicle.altitude_msl === null
                 ? "--"
                 : `${vehicle.altitude_msl.toFixed(1)} m`
+        );
+
+
+        setBooleanCheck(
+            `${id}-check-state-fresh`,
+            vehicle.mavros_state_fresh
+        );
+
+        setBooleanCheck(
+            `${id}-check-mavros-connected`,
+            vehicle.mavros_connected
+        );
+
+        setBooleanCheck(
+            `${id}-check-mode-allowed`,
+            vehicle.mode_allowed
+        );
+
+        setBooleanCheck(
+            `${id}-check-gps-valid`,
+            vehicle.gps_valid
+        );
+
+        setBooleanCheck(
+            `${id}-check-local-position`,
+            vehicle.local_position_valid
+        );
+
+        setBooleanCheck(
+            `${id}-check-battery-valid`,
+            vehicle.battery_valid
+        );
+
+        setBooleanCheck(
+            `${id}-check-autonomy-fresh`,
+            vehicle.autonomy_status_fresh
+        );
+
+        setBooleanCheck(
+            `${id}-check-mission-healthy`,
+            vehicle.mission_healthy
+        );
+
+        setBooleanCheck(
+            `${id}-check-failsafe-clear`,
+            vehicle.failsafe_latched,
+            true
+        );
+
+        setBooleanCheck(
+            `${id}-check-prearm-ready`,
+            vehicle.prearm_ready
+        );
+
+        setText(
+            `${id}-check-manual-input`,
+            vehicle.manual_input
+                ? "TRUE"
+                : "FALSE"
+        );
+
+        setText(
+            `${id}-check-battery-percent`,
+            vehicle.safety_battery_percentage == null
+                ? "--"
+                : `${vehicle.safety_battery_percentage.toFixed(0)} %`
+        );
+
+        setText(
+            `${id}-check-reason`,
+            vehicle.safety_reason ?? "--"
         );
 
 

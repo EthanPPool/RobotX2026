@@ -94,8 +94,16 @@ class VehicleManager:
                 "prearm_ready": False,
                 "flight_ready": False,
                 "failsafe_latched": False,
+
+                "mavros_state_fresh": False,
+                "mavros_connected": False,
+                "mode_allowed": False,
                 "gps_valid": False,
                 "local_position_valid": False,
+                "battery_valid": False,
+                "safety_battery_percentage": None,
+                "mission_healthy": False,
+                "autonomy_status_fresh": False,
 
                 "command_fresh": False,
                 "authorized": False,

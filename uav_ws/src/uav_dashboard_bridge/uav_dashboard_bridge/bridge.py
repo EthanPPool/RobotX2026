@@ -11,7 +11,7 @@ from geometry_msgs.msg import TwistStamped
 from mavros_msgs.msg import State
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import BatteryState, Imu, NavSatFix
+from sensor_msgs.msg import BatteryState, Imu, NavSatFix, NavSatStatus
 from std_msgs.msg import Float64
 from std_srvs.srv import Trigger
 
@@ -77,8 +77,16 @@ class UavDashboardBridge(Node):
             "prearm_ready": False,
             "flight_ready": False,
             "failsafe_latched": False,
+
+            "mavros_state_fresh": False,
+            "mavros_connected": False,
+            "mode_allowed": False,
             "gps_valid": False,
             "local_position_valid": False,
+            "battery_valid": False,
+            "safety_battery_percentage": None,
+            "mission_healthy": False,
+            "autonomy_status_fresh": False,
 
             "autonomy_enabled": False,
             "command_fresh": False,
@@ -239,14 +247,32 @@ class UavDashboardBridge(Node):
         with self.lock:
             self.gps_last_rx = time.monotonic()
 
+            if (
+                int(msg.status.status)
+                < int(NavSatStatus.STATUS_FIX)
+            ):
+                self.telemetry["latitude"] = None
+                self.telemetry["longitude"] = None
+                self.telemetry["altitude_msl"] = None
+                self.telemetry["gps_sigma_m"] = None
+                return
+
             if math.isfinite(msg.latitude):
-                self.telemetry["latitude"] = float(msg.latitude)
+                self.telemetry["latitude"] = float(
+                    msg.latitude
+                )
 
             if math.isfinite(msg.longitude):
-                self.telemetry["longitude"] = float(msg.longitude)
+                self.telemetry["longitude"] = float(
+                    msg.longitude
+                )
 
             if math.isfinite(msg.altitude):
-                self.telemetry["altitude_msl"] = float(msg.altitude)
+                self.telemetry["altitude_msl"] = float(
+                    msg.altitude
+                )
+
+            self.telemetry["gps_sigma_m"] = None
 
             try:
                 covariance = msg.position_covariance
@@ -264,7 +290,9 @@ class UavDashboardBridge(Node):
                     )
 
                     if math.isfinite(sigma):
-                        self.telemetry["gps_sigma_m"] = sigma
+                        self.telemetry[
+                            "gps_sigma_m"
+                        ] = sigma
 
             except Exception:
                 pass
@@ -384,18 +412,58 @@ class UavDashboardBridge(Node):
         with self.lock:
             self.safety_last_rx = time.monotonic()
 
-            self.telemetry["safety_state"] = str(msg.state_label)
-            self.telemetry["safety_reason"] = str(msg.reason)
+            self.telemetry["safety_state"] = str(
+                msg.state_label
+            )
+            self.telemetry["safety_reason"] = str(
+                msg.reason
+            )
 
-            self.telemetry["prearm_ready"] = bool(msg.prearm_ready)
-            self.telemetry["flight_ready"] = bool(msg.flight_ready)
+            self.telemetry["prearm_ready"] = bool(
+                msg.prearm_ready
+            )
+            self.telemetry["flight_ready"] = bool(
+                msg.flight_ready
+            )
             self.telemetry["failsafe_latched"] = bool(
                 msg.failsafe_latched
             )
 
-            self.telemetry["gps_valid"] = bool(msg.gps_valid)
+            self.telemetry["mavros_state_fresh"] = bool(
+                msg.mavros_state_fresh
+            )
+            self.telemetry["mavros_connected"] = bool(
+                msg.mavros_connected
+            )
+            self.telemetry["mode_allowed"] = bool(
+                msg.mode_allowed
+            )
+            self.telemetry["gps_valid"] = bool(
+                msg.gps_valid
+            )
             self.telemetry["local_position_valid"] = bool(
                 msg.local_position_valid
+            )
+            self.telemetry["battery_valid"] = bool(
+                msg.battery_valid
+            )
+            self.telemetry["mission_healthy"] = bool(
+                msg.mission_healthy
+            )
+
+            battery_percentage = float(
+                msg.battery_percentage
+            )
+
+            self.telemetry[
+                "safety_battery_percentage"
+            ] = (
+                battery_percentage * 100.0
+                if (
+                    math.isfinite(battery_percentage)
+                    and battery_percentage >= 0.0
+                )
+                else None
             )
 
     def autonomy_callback(self, msg):
@@ -706,9 +774,16 @@ class UavDashboardBridge(Node):
                 self.safety_last_rx,
             )
 
-            data["autonomy_age_sec"] = self.age(
+            autonomy_age = self.age(
                 now,
                 self.autonomy_last_rx,
+            )
+
+            data["autonomy_age_sec"] = autonomy_age
+
+            data["autonomy_status_fresh"] = (
+                autonomy_age is not None
+                and autonomy_age <= 0.75
             )
 
         return data
@@ -743,7 +818,12 @@ class UavDashboardBridge(Node):
 
         try:
             with self.send_lock:
-                client.sendall(encoded)
+                # Never allow a dead/slow ground-station
+                # connection to block the ROS executor.
+                client.sendall(
+                    encoded,
+                    socket.MSG_DONTWAIT,
+                )
 
         except OSError:
             self.drop_client(client)
