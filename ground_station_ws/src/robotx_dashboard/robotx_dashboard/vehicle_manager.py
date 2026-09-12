@@ -37,7 +37,24 @@ class VehicleManager:
                 "latitude": None,
                 "longitude": None,
                 "altitude": None,
+                "altitude_msl": None,
+                "relative_altitude": None,
+                "gps_sigma_m": None,
+
+                "roll_deg": None,
+                "pitch_deg": None,
+                "yaw_deg": None,
                 "heading_deg": None,
+
+                "ground_speed": None,
+                "vertical_speed": None,
+                "velocity_north": None,
+                "velocity_east": None,
+                "velocity_up": None,
+
+                "guided": False,
+                "manual_input": False,
+                "system_status": None,
 
                 "voltage": None,
                 "battery_percent": None,
@@ -70,6 +87,19 @@ class VehicleManager:
                 "software_stop": "UNKNOWN",
                 "autonomy_enabled": False,
                 "can_enable": False,
+
+                # UAV safety/autonomy telemetry.
+                "safety_state": "UNKNOWN",
+                "safety_reason": None,
+                "prearm_ready": False,
+                "flight_ready": False,
+                "failsafe_latched": False,
+                "gps_valid": False,
+                "local_position_valid": False,
+
+                "command_fresh": False,
+                "authorized": False,
+                "autonomy_reason": None,
 
                 "last_rx": None,
             }
@@ -120,11 +150,35 @@ class VehicleManager:
                     "battery_age_sec",
                     "gate_age_sec",
                     "bridge_age_sec",
+                    "state_age_sec",
+                    "gps_age_sec",
+                    "imu_age_sec",
+                    "velocity_age_sec",
+                    "safety_age_sec",
+                    "autonomy_age_sec",
                 ):
                     continue
 
                 if key in state:
                     state[key] = value
+
+            # UAV bridge calls absolute GPS altitude
+            # altitude_msl. Keep the old generic altitude
+            # field populated for the existing map/UI.
+            if (
+                fields.get("altitude_msl") is not None
+            ):
+                state["altitude"] = fields[
+                    "altitude_msl"
+                ]
+
+            # UAV bridge calls battery current simply
+            # "current". Normalize it into the existing
+            # shared state field.
+            if fields.get("current") is not None:
+                state["battery_current"] = fields[
+                    "current"
+                ]
 
             # ------------------------------------------------
             # Vehicle transport freshness

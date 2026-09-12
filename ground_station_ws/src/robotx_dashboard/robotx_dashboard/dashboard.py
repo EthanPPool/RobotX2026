@@ -17,6 +17,7 @@ from std_msgs.msg import String
 from boat_interfaces.msg import DetectedObjectArray, Gate
 from robotx_dashboard.vehicle_manager import VehicleManager
 from robotx_dashboard.clients.boat_client import BoatClient
+from robotx_dashboard.clients.uav_client import UavClient
 
 
 # ============================================================
@@ -295,6 +296,141 @@ HTML = r"""
             overflow-wrap: anywhere;
         }
 
+
+        /* ==================================================
+           UAV FLIGHT HUD
+           ================================================== */
+
+        .uav-hud-card {
+            grid-column: span 2;
+        }
+
+        .uav-hud-grid {
+            display: grid;
+            grid-template-columns:
+                minmax(280px, 1.25fr)
+                minmax(220px, 1fr);
+            gap: 20px;
+            align-items: center;
+        }
+
+        .uav-horizon {
+            position: relative;
+            width: min(100%, 360px);
+            aspect-ratio: 1 / 1;
+            margin: 0 auto;
+            overflow: hidden;
+            border-radius: 50%;
+            border: 4px solid #52677a;
+            background: #397caf;
+            box-shadow:
+                inset 0 0 20px rgba(0, 0, 0, 0.7),
+                0 0 12px rgba(0, 0, 0, 0.35);
+        }
+
+        .uav-horizon-world {
+            position: absolute;
+            width: 180%;
+            height: 180%;
+            left: -40%;
+            top: -40%;
+            transform-origin: 50% 50%;
+            will-change: transform;
+        }
+
+        .uav-horizon-sky {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 50%;
+            background: #397caf;
+        }
+
+        .uav-horizon-ground {
+            position: absolute;
+            left: 0;
+            top: 50%;
+            width: 100%;
+            height: 50%;
+            background: #8a5b32;
+        }
+
+        .uav-horizon-line {
+            position: absolute;
+            left: 0;
+            top: calc(50% - 2px);
+            width: 100%;
+            height: 4px;
+            background: white;
+            box-shadow: 0 0 3px black;
+        }
+
+        .uav-aircraft-symbol {
+            position: absolute;
+            z-index: 10;
+            left: 50%;
+            top: 50%;
+            width: 58%;
+            height: 4px;
+            transform: translate(-50%, -50%);
+            background:
+                linear-gradient(
+                    to right,
+                    #ffd84d 0 36%,
+                    transparent 36% 64%,
+                    #ffd84d 64% 100%
+                );
+            box-shadow: 0 0 2px #000;
+        }
+
+        .uav-aircraft-symbol:after {
+            content: "";
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            border: 3px solid #ffd84d;
+            border-radius: 50%;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .uav-hud-big {
+            font-family: monospace;
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        .uav-hud-label {
+            color: #9eacb9;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .uav-hud-readout {
+            margin-bottom: 16px;
+        }
+
+        .uav-warning {
+            color: #ee6c6c;
+        }
+
+        .uav-good {
+            color: #61d095;
+        }
+
+        @media (max-width: 800px) {
+            .uav-hud-card {
+                grid-column: span 1;
+            }
+
+            .uav-hud-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
 </style>
 </head>
 
@@ -404,6 +540,7 @@ function makeVehiclePage(id, vehicle) {
 
 
     let usvCards = "";
+    let uavCards = "";
 
     if (vehicle.type === "USV") {
 
@@ -693,6 +830,262 @@ function makeVehiclePage(id, vehicle) {
     }
 
 
+    if (vehicle.type === "UAV") {
+
+        uavCards = `
+
+            <div class="card uav-hud-card">
+                <h2>Flight HUD</h2>
+
+                <div class="uav-hud-grid">
+
+                    <div
+                        class="uav-horizon"
+                        id="${id}-horizon">
+
+                        <div
+                            class="uav-horizon-world"
+                            id="${id}-horizon-world">
+
+                            <div class="uav-horizon-sky">
+                            </div>
+
+                            <div class="uav-horizon-ground">
+                            </div>
+
+                            <div class="uav-horizon-line">
+                            </div>
+
+                        </div>
+
+                        <div class="uav-aircraft-symbol">
+                        </div>
+
+                    </div>
+
+
+                    <div>
+
+                        <div class="uav-hud-readout">
+                            <div class="uav-hud-label">
+                                Heading
+                            </div>
+
+                            <div
+                                class="uav-hud-big"
+                                id="${id}-hud-heading">
+                                --
+                            </div>
+                        </div>
+
+
+                        <div class="uav-hud-readout">
+                            <div class="uav-hud-label">
+                                Relative Altitude
+                            </div>
+
+                            <div
+                                class="uav-hud-big"
+                                id="${id}-relative-altitude">
+                                --
+                            </div>
+                        </div>
+
+
+                        <div class="uav-hud-readout">
+                            <div class="uav-hud-label">
+                                Ground Speed
+                            </div>
+
+                            <div
+                                class="uav-hud-big"
+                                id="${id}-ground-speed">
+                                --
+                            </div>
+                        </div>
+
+
+                        <div class="uav-hud-readout">
+                            <div class="uav-hud-label">
+                                Vertical Speed
+                            </div>
+
+                            <div
+                                class="uav-hud-big"
+                                id="${id}-vertical-speed">
+                                --
+                            </div>
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <div class="row">
+                    <span>Roll</span>
+                    <span
+                        class="value"
+                        id="${id}-roll">
+                        --
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Pitch</span>
+                    <span
+                        class="value"
+                        id="${id}-pitch">
+                        --
+                    </span>
+                </div>
+
+            </div>
+
+
+            <div class="card">
+                <h2>GPS / Navigation</h2>
+
+                <div class="row">
+                    <span>GPS Valid</span>
+                    <span
+                        class="value"
+                        id="${id}-gps-valid">
+                        NO
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>GPS Position σ</span>
+                    <span
+                        class="value"
+                        id="${id}-gps-sigma">
+                        --
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Local Position</span>
+                    <span
+                        class="value"
+                        id="${id}-local-position">
+                        INVALID
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>MSL Altitude</span>
+                    <span
+                        class="value"
+                        id="${id}-altitude-msl">
+                        --
+                    </span>
+                </div>
+
+            </div>
+
+
+            <div class="card">
+                <h2>Flight Safety</h2>
+
+                <div class="row">
+                    <span>Safety State</span>
+                    <span
+                        class="value"
+                        id="${id}-safety-state">
+                        UNKNOWN
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Pre-arm Ready</span>
+                    <span
+                        class="value"
+                        id="${id}-prearm-ready">
+                        NO
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Flight Ready</span>
+                    <span
+                        class="value"
+                        id="${id}-flight-ready">
+                        NO
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Failsafe</span>
+                    <span
+                        class="value"
+                        id="${id}-failsafe">
+                        CLEAR
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Reason</span>
+                    <span
+                        class="value"
+                        id="${id}-safety-reason">
+                        --
+                    </span>
+                </div>
+
+            </div>
+
+
+            <div class="card">
+                <h2>Autonomy</h2>
+
+                <div class="row">
+                    <span>Enabled</span>
+                    <span
+                        class="value"
+                        id="${id}-uav-autonomy">
+                        OFF
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Authorized</span>
+                    <span
+                        class="value"
+                        id="${id}-authorized">
+                        NO
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Command Fresh</span>
+                    <span
+                        class="value"
+                        id="${id}-command-fresh">
+                        NO
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Status</span>
+                    <span
+                        class="value"
+                        id="${id}-autonomy-reason">
+                        --
+                    </span>
+                </div>
+
+                <div class="control-message">
+                    UAV remote commands are disabled during
+                    telemetry integration.
+                </div>
+
+            </div>
+
+        `;
+    }
+
+
     page.innerHTML = `
         <div class="vehicle-layout">
 
@@ -811,6 +1204,7 @@ function makeVehiclePage(id, vehicle) {
 
 
             ${usvCards}
+            ${uavCards}
 
         </div>
     `;
@@ -1022,6 +1416,174 @@ function updateVehicle(id, vehicle) {
             `${id}-stop-state`,
             vehicle.software_stop
                 ?? "UNKNOWN"
+        );
+    }
+
+
+
+
+    if (vehicle.type === "UAV") {
+
+        const roll =
+            vehicle.roll_deg === null
+                ? 0.0
+                : vehicle.roll_deg;
+
+        const pitch =
+            vehicle.pitch_deg === null
+                ? 0.0
+                : vehicle.pitch_deg;
+
+        const pitchOffset =
+            Math.max(
+                -80,
+                Math.min(
+                    80,
+                    pitch * 3.0
+                )
+            );
+
+        const horizonWorld =
+            document.getElementById(
+                `${id}-horizon-world`
+            );
+
+        if (horizonWorld) {
+
+            horizonWorld.style.transform =
+                `translateY(${pitchOffset}px) `
+                + `rotate(${-roll}deg)`;
+        }
+
+
+        setText(
+            `${id}-roll`,
+            vehicle.roll_deg === null
+                ? "--"
+                : `${vehicle.roll_deg.toFixed(1)}°`
+        );
+
+        setText(
+            `${id}-pitch`,
+            vehicle.pitch_deg === null
+                ? "--"
+                : `${vehicle.pitch_deg.toFixed(1)}°`
+        );
+
+        setText(
+            `${id}-hud-heading`,
+            vehicle.heading_deg === null
+                ? "--"
+                : `${vehicle.heading_deg.toFixed(0)}°`
+        );
+
+        setText(
+            `${id}-relative-altitude`,
+            vehicle.relative_altitude === null
+                ? "--"
+                : `${vehicle.relative_altitude.toFixed(1)} m`
+        );
+
+        setText(
+            `${id}-ground-speed`,
+            vehicle.ground_speed === null
+                ? "--"
+                : `${vehicle.ground_speed.toFixed(1)} m/s`
+        );
+
+        setText(
+            `${id}-vertical-speed`,
+            vehicle.vertical_speed === null
+                ? "--"
+                : `${vehicle.vertical_speed.toFixed(1)} m/s`
+        );
+
+
+        setText(
+            `${id}-gps-valid`,
+            vehicle.gps_valid
+                ? "VALID"
+                : "INVALID"
+        );
+
+        setText(
+            `${id}-gps-sigma`,
+            vehicle.gps_sigma_m === null
+                ? "--"
+                : `${vehicle.gps_sigma_m.toFixed(1)} m`
+        );
+
+        setText(
+            `${id}-local-position`,
+            vehicle.local_position_valid
+                ? "VALID"
+                : "INVALID"
+        );
+
+        setText(
+            `${id}-altitude-msl`,
+            vehicle.altitude_msl === null
+                ? "--"
+                : `${vehicle.altitude_msl.toFixed(1)} m`
+        );
+
+
+        setText(
+            `${id}-safety-state`,
+            vehicle.safety_state ?? "UNKNOWN"
+        );
+
+        setText(
+            `${id}-prearm-ready`,
+            vehicle.prearm_ready
+                ? "YES"
+                : "NO"
+        );
+
+        setText(
+            `${id}-flight-ready`,
+            vehicle.flight_ready
+                ? "YES"
+                : "NO"
+        );
+
+        setText(
+            `${id}-failsafe`,
+            vehicle.failsafe_latched
+                ? "LATCHED"
+                : "CLEAR"
+        );
+
+        setText(
+            `${id}-safety-reason`,
+            vehicle.safety_reason ?? "--"
+        );
+
+
+        setText(
+            `${id}-uav-autonomy`,
+            vehicle.autonomy_enabled
+                ? "ENABLED"
+                : "OFF"
+        );
+
+        setText(
+            `${id}-authorized`,
+            vehicle.authorized
+                ? "YES"
+                : "NO"
+        );
+
+        setText(
+            `${id}-command-fresh`,
+            vehicle.command_fresh
+                ? "YES"
+                : "NO"
+        );
+
+        setText(
+            `${id}-autonomy-reason`,
+            vehicle.autonomy_reason ?? "--"
         );
     }
 
@@ -1688,15 +2250,37 @@ class RobotXDashboard(Node):
 
         self.boat_client.start()
 
+        self.uav_client = UavClient(
+            "uav",
+            self.vehicle_manager.update_vehicle,
+            host="192.168.2.104",
+            port=8766,
+        )
+
+        self.vehicle_manager.register_client(
+            "uav",
+            self.uav_client,
+        )
+
+        self.uav_client.start()
+
         for vehicle_id, spec in VEHICLES.items():
 
-            # BlueBoat telemetry now arrives through BoatClient
-            # over TCP from the Jetson-side dashboard bridge.
-            # Do not join the BlueBoat ROS 2 graph from Beeptop.
+            # USV and UAV telemetry arrive over their
+            # vehicle-local TCP dashboard bridges.
+            # Beeptop must not join either vehicle's ROS 2
+            # DDS graph directly.
             if vehicle_id == "boat":
                 self.get_logger().info(
                     "Monitoring USV via TCP bridge "
                     "at 192.168.2.20:8765"
+                )
+                continue
+
+            if vehicle_id == "uav":
+                self.get_logger().info(
+                    "Monitoring UAV via TCP bridge "
+                    "at 192.168.2.104:8766"
                 )
                 continue
 
@@ -1798,6 +2382,9 @@ class RobotXDashboard(Node):
 
         if hasattr(self, "boat_client"):
             self.boat_client.stop()
+
+        if hasattr(self, "uav_client"):
+            self.uav_client.stop()
 
         return super().destroy_node()
 
