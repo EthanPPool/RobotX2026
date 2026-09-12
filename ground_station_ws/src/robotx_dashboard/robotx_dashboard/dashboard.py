@@ -1773,6 +1773,15 @@ function updateVehicle(id, vehicle) {
             );
 
 
+        // The browser only gates on transport availability.
+        //
+        // Vehicle-side ROS services remain the authoritative
+        // safety/authorization boundary. This lets an operator
+        // request a command and receive the actual rejection
+        // reason instead of hiding the command in the GUI.
+        //
+        // The physical RC remains completely independent.
+
         if (modeButton) {
             modeButton.disabled =
                 !vehicle.online;
@@ -1780,55 +1789,42 @@ function updateVehicle(id, vehicle) {
 
         if (armButton) {
             armButton.disabled =
-                !vehicle.online
-                || vehicle.armed
-                || !vehicle.prearm_ready;
+                !vehicle.online;
         }
 
         if (disarmButton) {
             disarmButton.disabled =
-                !vehicle.online
-                || !vehicle.armed;
+                !vehicle.online;
         }
 
         if (takeoffButton) {
             takeoffButton.disabled =
-                !vehicle.online
-                || !vehicle.armed
-                || !vehicle.flight_ready
-                || vehicle.mode !== "GUIDED";
+                !vehicle.online;
         }
 
         if (rtlButton) {
             rtlButton.disabled =
-                !vehicle.online
-                || !vehicle.armed;
+                !vehicle.online;
         }
 
         if (landButton) {
             landButton.disabled =
-                !vehicle.online
-                || !vehicle.armed;
+                !vehicle.online;
         }
 
         if (autonomyEnableButton) {
             autonomyEnableButton.disabled =
-                !vehicle.online
-                || vehicle.autonomy_enabled
-                || !vehicle.flight_ready
-                || vehicle.mode !== "GUIDED";
+                !vehicle.online;
         }
 
         if (autonomyDisableButton) {
             autonomyDisableButton.disabled =
-                !vehicle.online
-                || !vehicle.autonomy_enabled;
+                !vehicle.online;
         }
 
         if (resetFailsafeButton) {
             resetFailsafeButton.disabled =
-                !vehicle.online
-                || !vehicle.failsafe_latched;
+                !vehicle.online;
         }
     }
 
