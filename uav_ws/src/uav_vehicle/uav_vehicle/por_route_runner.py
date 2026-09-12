@@ -44,13 +44,13 @@ class PorRouteRunner(Node):
 
         # Current MAVROS ROS 2 namespace seen on this aircraft. These remain
         # parameters so they can be overridden without changing code.
-        self.declare_parameter('state_topic', '/mavros/mavros/state')
-        self.declare_parameter('local_pose_topic', '/mavros/mavros/local_position/pose')
-        self.declare_parameter('setpoint_topic', '/mavros/mavros/setpoint_position/local')
-        self.declare_parameter('arming_service', '/mavros/mavros/cmd/arming')
-        self.declare_parameter('set_mode_service', '/mavros/mavros/set_mode')
-        self.declare_parameter('takeoff_service', '/mavros/mavros/cmd/takeoff')
-        self.declare_parameter('command_service', '/mavros/mavros/cmd/command')
+        self.declare_parameter('state_topic', '/mavros/state')
+        self.declare_parameter('local_pose_topic', '/mavros/local_position/pose')
+        self.declare_parameter('setpoint_topic', '/mavros/setpoint_position/local')
+        self.declare_parameter('arming_service', '/mavros/cmd/arming')
+        self.declare_parameter('set_mode_service', '/mavros/set_mode')
+        self.declare_parameter('takeoff_service', '/mavros/cmd/takeoff')
+        self.declare_parameter('command_service', '/mavros/cmd/command')
 
         self.route_name = str(self.get_parameter('route_name').value)
         raw_points = list(self.get_parameter('route_points').value)

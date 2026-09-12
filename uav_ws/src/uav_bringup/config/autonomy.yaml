@@ -1,11 +1,11 @@
 vehicle_manager:
   ros__parameters:
-    state_topic: /mavros/mavros/state
+    state_topic: /mavros/state
     safety_status_topic: /vehicle/safety_status
-    arming_service: /mavros/mavros/cmd/arming
-    set_mode_service: /mavros/mavros/set_mode
-    takeoff_service: /mavros/mavros/cmd/takeoff
-    command_execution_enabled: true
+    arming_service: /mavros/cmd/arming
+    set_mode_service: /mavros/set_mode
+    takeoff_service: /mavros/cmd/takeoff
+    command_execution_enabled: false
     service_timeout: 2.0
     safety_timeout: 2.0
     guided_mode: GUIDED
@@ -17,10 +17,10 @@ vehicle_manager:
 
 safety_supervisor:
   ros__parameters:
-    state_topic: /mavros/mavros/state
-    battery_topic: /mavros/mavros/battery
-    gps_topic: /mavros/mavros/global_position/raw/fix
-    local_position_topic: /mavros/mavros/local_position/pose
+    state_topic: /mavros/state
+    battery_topic: /mavros/battery
+    gps_topic: /mavros/global_position/raw/fix
+    local_position_topic: /mavros/local_position/pose
     autonomy_status_topic: /vehicle/autonomy_status
     mission_command_topic: /mission/command
     safety_status_topic: /vehicle/safety_status
@@ -33,8 +33,8 @@ safety_supervisor:
 mavros_command_bridge:
   ros__parameters:
     input_topic: /control/cmd_vel
-    output_topic: /mavros/mavros/setpoint_velocity/cmd_vel
-    state_topic: /mavros/mavros/state
+    output_topic: /mavros/setpoint_velocity/cmd_vel
+    state_topic: /mavros/state
     status_topic: /vehicle/autonomy_status
     safety_status_topic: /vehicle/safety_status
     autonomy_enabled: false

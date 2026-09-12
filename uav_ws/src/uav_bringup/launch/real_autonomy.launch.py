@@ -33,6 +33,7 @@ def generate_launch_description():
             AnyLaunchDescriptionSource(mavros_launch),
             launch_arguments={
                 'fcu_url': fcu_url,
+                'namespace': '/',
             }.items()
         ),
 
