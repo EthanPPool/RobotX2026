@@ -1514,6 +1514,69 @@ function setBooleanCheck(
 }
 
 
+function formatQuadrantalHeading(value) {
+
+    if (
+        value === null
+        || value === undefined
+        || !Number.isFinite(Number(value))
+    ) {
+        return "--";
+    }
+
+    let heading =
+        ((Number(value) % 360) + 360) % 360;
+
+    // Keep one decimal when useful, otherwise suppress .0.
+    function angleText(angle) {
+        const rounded =
+            Math.round(angle * 10) / 10;
+
+        return Number.isInteger(rounded)
+            ? rounded.toFixed(0)
+            : rounded.toFixed(1);
+    }
+
+    // Exact cardinal directions.
+    if (heading < 0.05 || heading >= 359.95) {
+        return "N";
+    }
+
+    if (Math.abs(heading - 90) < 0.05) {
+        return "E";
+    }
+
+    if (Math.abs(heading - 180) < 0.05) {
+        return "S";
+    }
+
+    if (Math.abs(heading - 270) < 0.05) {
+        return "W";
+    }
+
+    // Quadrantal bearing notation:
+    //
+    //   0..90     N angle E
+    //   90..180   S angle E
+    //   180..270  S angle W
+    //   270..360  N angle W
+
+    if (heading < 90) {
+        return `N ${angleText(heading)}° E`;
+    }
+
+    if (heading < 180) {
+        return `S ${angleText(180 - heading)}° E`;
+    }
+
+    if (heading < 270) {
+        return `S ${angleText(heading - 180)}° W`;
+    }
+
+    return `N ${angleText(360 - heading)}° W`;
+}
+
+
 function updateVehicle(id, vehicle) {
 
     if (!vehiclePages[id]) {
@@ -1757,9 +1820,9 @@ function updateVehicle(id, vehicle) {
 
         setText(
             `${id}-hud-heading`,
-            vehicle.heading_deg === null
-                ? "--"
-                : `${vehicle.heading_deg.toFixed(0)}°`
+            formatQuadrantalHeading(
+                vehicle.heading_deg
+            )
         );
 
         setText(
@@ -2104,9 +2167,9 @@ function updateVehicle(id, vehicle) {
 
     setText(
         `${id}-heading`,
-        vehicle.heading_deg === null
-            ? "--"
-            : `${vehicle.heading_deg.toFixed(1)}°`
+        formatQuadrantalHeading(
+            vehicle.heading_deg
+        )
     );
 
     setText(
@@ -2452,37 +2515,17 @@ async function postUavControl(
 
 async function uavSimpleAction(action) {
 
-    const confirmations = {
-        arm:
+    // ARM is the only UAV action requiring
+    // an additional operator confirmation.
+    if (action === "arm") {
+
+        if (!confirm(
             "ARM the UAV?\\n\\n"
             + "Propellers may become active if "
-            + "vehicle-side execution is enabled.",
-
-        disarm:
-            "DISARM the UAV?",
-
-        rtl:
-            "Command RTL?\\n\\n"
-            + "The UAV may immediately begin "
-            + "Return-to-Launch.",
-
-        land:
-            "Command LAND?\\n\\n"
-            + "The UAV may immediately begin "
-            + "landing.",
-
-        reset_failsafe:
-            "Reset the UAV failsafe latch?"
-    };
-
-    const message =
-        confirmations[action];
-
-    if (
-        message
-        && !confirm(message)
-    ) {
-        return;
+            + "vehicle-side execution is enabled."
+        )) {
+            return;
+        }
     }
 
     await postUavControl(action);
@@ -2502,14 +2545,6 @@ async function uavSetMode() {
 
     const mode =
         String(select.value).toUpperCase();
-
-    if (!confirm(
-        "Request UAV flight mode "
-        + mode
-        + "?"
-    )) {
-        return;
-    }
 
     await postUavControl(
         "set_mode",
@@ -2547,15 +2582,6 @@ async function uavTakeoff() {
         return;
     }
 
-    if (!confirm(
-        "TAKE OFF to "
-        + altitude.toFixed(1)
-        + " m?\\n\\n"
-        + "This is a real flight command."
-    )) {
-        return;
-    }
-
     await postUavControl(
         "takeoff",
         {
@@ -2566,15 +2592,6 @@ async function uavTakeoff() {
 
 
 async function uavSetAutonomy(enabled) {
-
-    const text =
-        enabled
-            ? "ENABLE UAV autonomy?"
-            : "DISABLE UAV autonomy?";
-
-    if (!confirm(text)) {
-        return;
-    }
 
     await postUavControl(
         "set_autonomy",
