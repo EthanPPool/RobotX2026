@@ -16,7 +16,7 @@ setup(
     zip_safe=True,
     maintainer='RobotX UAV Team',
     maintainer_email='robotxuav@example.com',
-    description='TCP telemetry bridge between the RobotX UAV ROS 2 stack and the ground station.',
+    description='TCP telemetry and guarded command bridge between the RobotX UAV ROS 2 stack and the ground station.',
     license='Apache-2.0',
     extras_require={
         'test': [

@@ -3,6 +3,7 @@
 import json
 import socket
 import threading
+import uuid
 
 from robotx_dashboard.clients.base_client import BaseVehicleClient
 
@@ -16,6 +17,7 @@ class UavClient(BaseVehicleClient):
         host="192.168.2.104",
         port=8766,
         reconnect_delay=1.0,
+        command_timeout=5.0,
     ):
         super().__init__(
             vehicle_id,
@@ -25,11 +27,15 @@ class UavClient(BaseVehicleClient):
         self.host = host
         self.port = int(port)
         self.reconnect_delay = float(reconnect_delay)
+        self.command_timeout = float(command_timeout)
 
         self._stop_event = threading.Event()
         self._thread = None
         self._socket = None
+
         self._socket_lock = threading.RLock()
+        self._pending_lock = threading.RLock()
+        self._pending = {}
 
     def start(self):
         if self._thread and self._thread.is_alive():
@@ -55,12 +61,80 @@ class UavClient(BaseVehicleClient):
         self.connected = False
 
     def command(self, command, data=None):
-        # First integration phase is intentionally read-only.
+        if not self.connected:
+            return {
+                "success": False,
+                "message": "UAV transport is offline",
+            }
+
+        request_id = uuid.uuid4().hex
+
+        waiter = {
+            "event": threading.Event(),
+            "response": None,
+        }
+
+        with self._pending_lock:
+            self._pending[request_id] = waiter
+
+        message = {
+            "type": "command",
+            "request_id": request_id,
+            "command": str(command),
+            "data": dict(data or {}),
+        }
+
+        try:
+            self._send(message)
+
+        except Exception as exc:
+            with self._pending_lock:
+                self._pending.pop(
+                    request_id,
+                    None,
+                )
+
+            return {
+                "success": False,
+                "message": (
+                    f"UAV command send failed: {exc}"
+                ),
+            }
+
+        if not waiter["event"].wait(
+            self.command_timeout
+        ):
+            with self._pending_lock:
+                self._pending.pop(
+                    request_id,
+                    None,
+                )
+
+            return {
+                "success": False,
+                "message": "UAV command timed out",
+            }
+
+        response = waiter["response"]
+
+        if not isinstance(response, dict):
+            return {
+                "success": False,
+                "message": "Invalid UAV response",
+            }
+
         return {
-            "success": False,
-            "message": (
-                "UAV remote commands are disabled; "
-                "telemetry-only integration is active"
+            "success": bool(
+                response.get(
+                    "success",
+                    False,
+                )
+            ),
+            "message": str(
+                response.get(
+                    "message",
+                    "",
+                )
             ),
         }
 
@@ -101,7 +175,9 @@ class UavClient(BaseVehicleClient):
                     except json.JSONDecodeError:
                         continue
 
-                    self._handle_message(message)
+                    self._handle_message(
+                        message
+                    )
 
             except (
                 ConnectionRefusedError,
@@ -137,6 +213,10 @@ class UavClient(BaseVehicleClient):
                 except Exception:
                     pass
 
+                self._fail_pending(
+                    "UAV connection lost"
+                )
+
             self._stop_event.wait(
                 self.reconnect_delay
             )
@@ -145,22 +225,70 @@ class UavClient(BaseVehicleClient):
         if not isinstance(message, dict):
             return
 
-        if message.get("type") != "telemetry":
-            return
-
-        if message.get("vehicle") not in (
-            None,
-            "uav",
-        ):
-            return
-
-        data = message.get(
-            "data",
-            {},
+        message_type = message.get(
+            "type"
         )
 
-        if isinstance(data, dict):
-            self.update_state(**data)
+        if message_type == "telemetry":
+
+            if message.get(
+                "vehicle"
+            ) not in (
+                None,
+                "uav",
+            ):
+                return
+
+            data = message.get(
+                "data",
+                {},
+            )
+
+            if isinstance(data, dict):
+                self.update_state(**data)
+
+            return
+
+        if message_type == "response":
+
+            request_id = message.get(
+                "request_id"
+            )
+
+            if not request_id:
+                return
+
+            with self._pending_lock:
+                waiter = self._pending.pop(
+                    request_id,
+                    None,
+                )
+
+            if waiter is None:
+                return
+
+            waiter["response"] = message
+            waiter["event"].set()
+
+    def _send(self, message):
+        payload = (
+            json.dumps(
+                message,
+                separators=(",", ":"),
+            )
+            + "\n"
+        ).encode("utf-8")
+
+        with self._socket_lock:
+
+            if self._socket is None:
+                raise ConnectionError(
+                    "UAV socket unavailable"
+                )
+
+            self._socket.sendall(
+                payload
+            )
 
     def _close_socket(self):
         with self._socket_lock:
@@ -181,3 +309,19 @@ class UavClient(BaseVehicleClient):
             sock.close()
         except OSError:
             pass
+
+    def _fail_pending(self, message):
+        with self._pending_lock:
+            pending = list(
+                self._pending.values()
+            )
+
+            self._pending.clear()
+
+        for waiter in pending:
+            waiter["response"] = {
+                "success": False,
+                "message": message,
+            }
+
+            waiter["event"].set()

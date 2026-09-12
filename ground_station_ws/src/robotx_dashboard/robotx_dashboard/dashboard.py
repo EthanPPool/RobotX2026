@@ -1076,8 +1076,148 @@ function makeVehiclePage(id, vehicle) {
                 </div>
 
                 <div class="control-message">
-                    UAV remote commands are disabled during
-                    telemetry integration.
+                    Remote commands use the UAV vehicle-side
+                    safety services. Commands may still be
+                    rejected by vehicle safety gates.
+                </div>
+
+            </div>
+
+
+            <div class="card">
+                <h2>Remote Flight Control</h2>
+
+                <div class="row">
+                    <span>Requested Mode</span>
+
+                    <select
+                        id="${id}-mode-select"
+                        style="
+                            background:#18222c;
+                            color:white;
+                            border:1px solid #52677a;
+                            border-radius:4px;
+                            padding:6px;
+                        ">
+
+                        <option value="STABILIZE">
+                            STABILIZE
+                        </option>
+
+                        <option value="GUIDED">
+                            GUIDED
+                        </option>
+
+                        <option value="LOITER">
+                            LOITER
+                        </option>
+
+                        <option value="RTL">
+                            RTL
+                        </option>
+
+                        <option value="LAND">
+                            LAND
+                        </option>
+
+                    </select>
+                </div>
+
+                <button
+                    class="control-button reset-button"
+                    id="${id}-set-mode-button"
+                    onclick="uavSetMode()">
+                    SET MODE
+                </button>
+
+
+                <button
+                    class="control-button arm-button"
+                    id="${id}-arm-button"
+                    onclick="uavSimpleAction('arm')">
+                    ARM
+                </button>
+
+                <button
+                    class="control-button disarm-button"
+                    id="${id}-disarm-button"
+                    onclick="uavSimpleAction('disarm')">
+                    DISARM
+                </button>
+
+
+                <div class="row"
+                     style="margin-top:16px;">
+
+                    <span>Takeoff Altitude</span>
+
+                    <input
+                        id="${id}-takeoff-altitude"
+                        type="number"
+                        value="2.0"
+                        min="1.0"
+                        max="5.0"
+                        step="0.5"
+                        style="
+                            width:80px;
+                            background:#18222c;
+                            color:white;
+                            border:1px solid #52677a;
+                            border-radius:4px;
+                            padding:6px;
+                        ">
+                </div>
+
+                <button
+                    class="control-button enable-button"
+                    id="${id}-takeoff-button"
+                    onclick="uavTakeoff()">
+                    TAKEOFF
+                </button>
+
+
+                <button
+                    class="control-button reset-button"
+                    id="${id}-rtl-button"
+                    onclick="uavSimpleAction('rtl')">
+                    RTL
+                </button>
+
+                <button
+                    class="control-button disarm-button"
+                    id="${id}-land-button"
+                    onclick="uavSimpleAction('land')">
+                    LAND
+                </button>
+
+
+                <button
+                    class="control-button enable-button"
+                    id="${id}-autonomy-enable-button"
+                    onclick="uavSetAutonomy(true)">
+                    ENABLE AUTONOMY
+                </button>
+
+                <button
+                    class="control-button reset-button"
+                    id="${id}-autonomy-disable-button"
+                    onclick="uavSetAutonomy(false)">
+                    DISABLE AUTONOMY
+                </button>
+
+
+                <button
+                    class="control-button reset-button"
+                    id="${id}-reset-failsafe-button"
+                    onclick="uavSimpleAction('reset_failsafe')">
+                    RESET FAILSAFE
+                </button>
+
+
+                <div
+                    class="control-message"
+                    id="${id}-control-message">
+                    No UAV control command sent.
                 </div>
 
             </div>
@@ -1585,6 +1725,111 @@ function updateVehicle(id, vehicle) {
             `${id}-autonomy-reason`,
             vehicle.autonomy_reason ?? "--"
         );
+
+
+        const modeButton =
+            document.getElementById(
+                `${id}-set-mode-button`
+            );
+
+        const armButton =
+            document.getElementById(
+                `${id}-arm-button`
+            );
+
+        const disarmButton =
+            document.getElementById(
+                `${id}-disarm-button`
+            );
+
+        const takeoffButton =
+            document.getElementById(
+                `${id}-takeoff-button`
+            );
+
+        const rtlButton =
+            document.getElementById(
+                `${id}-rtl-button`
+            );
+
+        const landButton =
+            document.getElementById(
+                `${id}-land-button`
+            );
+
+        const autonomyEnableButton =
+            document.getElementById(
+                `${id}-autonomy-enable-button`
+            );
+
+        const autonomyDisableButton =
+            document.getElementById(
+                `${id}-autonomy-disable-button`
+            );
+
+        const resetFailsafeButton =
+            document.getElementById(
+                `${id}-reset-failsafe-button`
+            );
+
+
+        if (modeButton) {
+            modeButton.disabled =
+                !vehicle.online;
+        }
+
+        if (armButton) {
+            armButton.disabled =
+                !vehicle.online
+                || vehicle.armed
+                || !vehicle.prearm_ready;
+        }
+
+        if (disarmButton) {
+            disarmButton.disabled =
+                !vehicle.online
+                || !vehicle.armed;
+        }
+
+        if (takeoffButton) {
+            takeoffButton.disabled =
+                !vehicle.online
+                || !vehicle.armed
+                || !vehicle.flight_ready
+                || vehicle.mode !== "GUIDED";
+        }
+
+        if (rtlButton) {
+            rtlButton.disabled =
+                !vehicle.online
+                || !vehicle.armed;
+        }
+
+        if (landButton) {
+            landButton.disabled =
+                !vehicle.online
+                || !vehicle.armed;
+        }
+
+        if (autonomyEnableButton) {
+            autonomyEnableButton.disabled =
+                !vehicle.online
+                || vehicle.autonomy_enabled
+                || !vehicle.flight_ready
+                || vehicle.mode !== "GUIDED";
+        }
+
+        if (autonomyDisableButton) {
+            autonomyDisableButton.disabled =
+                !vehicle.online
+                || !vehicle.autonomy_enabled;
+        }
+
+        if (resetFailsafeButton) {
+            resetFailsafeButton.disabled =
+                !vehicle.online
+                || !vehicle.failsafe_latched;
+        }
     }
 
 
@@ -1916,6 +2161,215 @@ async function toggleUsvStop(input) {
 
 
     input.disabled = false;
+}
+
+
+
+
+async function postUavControl(
+    action,
+    payload = null
+) {
+
+    const messageBox =
+        document.getElementById(
+            "uav-control-message"
+        );
+
+    if (messageBox) {
+        messageBox.textContent =
+            "Sending " + action + "...";
+    }
+
+    const options = {
+        method: "POST",
+        cache: "no-store"
+    };
+
+    if (payload !== null) {
+        options.headers = {
+            "Content-Type":
+                "application/json"
+        };
+
+        options.body =
+            JSON.stringify(payload);
+    }
+
+
+    try {
+
+        const response = await fetch(
+            `/api/uav/${action}`,
+            options
+        );
+
+        const result =
+            await response.json();
+
+        if (messageBox) {
+            messageBox.textContent =
+                result.message
+                ?? "No response message.";
+        }
+
+        if (
+            typeof refresh
+            === "function"
+        ) {
+            await refresh();
+        }
+
+        return result;
+
+    } catch (error) {
+
+        if (messageBox) {
+            messageBox.textContent =
+                "UAV control request failed: "
+                + error;
+        }
+
+        return {
+            success: false,
+            message: String(error)
+        };
+    }
+}
+
+
+async function uavSimpleAction(action) {
+
+    const confirmations = {
+        arm:
+            "ARM the UAV?\\n\\n"
+            + "Propellers may become active if "
+            + "vehicle-side execution is enabled.",
+
+        disarm:
+            "DISARM the UAV?",
+
+        rtl:
+            "Command RTL?\\n\\n"
+            + "The UAV may immediately begin "
+            + "Return-to-Launch.",
+
+        land:
+            "Command LAND?\\n\\n"
+            + "The UAV may immediately begin "
+            + "landing.",
+
+        reset_failsafe:
+            "Reset the UAV failsafe latch?"
+    };
+
+    const message =
+        confirmations[action];
+
+    if (
+        message
+        && !confirm(message)
+    ) {
+        return;
+    }
+
+    await postUavControl(action);
+}
+
+
+async function uavSetMode() {
+
+    const select =
+        document.getElementById(
+            "uav-mode-select"
+        );
+
+    if (!select) {
+        return;
+    }
+
+    const mode =
+        String(select.value).toUpperCase();
+
+    if (!confirm(
+        "Request UAV flight mode "
+        + mode
+        + "?"
+    )) {
+        return;
+    }
+
+    await postUavControl(
+        "set_mode",
+        {
+            mode: mode
+        }
+    );
+}
+
+
+async function uavTakeoff() {
+
+    const input =
+        document.getElementById(
+            "uav-takeoff-altitude"
+        );
+
+    if (!input) {
+        return;
+    }
+
+    const altitude =
+        Number(input.value);
+
+    if (
+        !Number.isFinite(altitude)
+        || altitude < 1.0
+        || altitude > 5.0
+    ) {
+        alert(
+            "Takeoff altitude must be "
+            + "between 1.0 and 5.0 meters."
+        );
+
+        return;
+    }
+
+    if (!confirm(
+        "TAKE OFF to "
+        + altitude.toFixed(1)
+        + " m?\\n\\n"
+        + "This is a real flight command."
+    )) {
+        return;
+    }
+
+    await postUavControl(
+        "takeoff",
+        {
+            altitude: altitude
+        }
+    );
+}
+
+
+async function uavSetAutonomy(enabled) {
+
+    const text =
+        enabled
+            ? "ENABLE UAV autonomy?"
+            : "DISABLE UAV autonomy?";
+
+    if (!confirm(text)) {
+        return;
+    }
+
+    await postUavControl(
+        "set_autonomy",
+        {
+            enabled: enabled
+        }
+    );
 }
 
 
@@ -2492,6 +2946,175 @@ class RobotXDashboard(Node):
                     self.execute_reset_mission
                 ),
             methods=["POST"]
+        )
+
+        # ----------------------------------------------------
+        # UAV remote command routes
+        # ----------------------------------------------------
+
+        def uav_command_response(
+            command,
+            data=None,
+        ):
+            result = self.uav_client.command(
+                command,
+                data or {},
+            )
+
+            return jsonify({
+                "success": bool(
+                    result.get(
+                        "success",
+                        False,
+                    )
+                ),
+                "message": str(
+                    result.get(
+                        "message",
+                        "",
+                    )
+                ),
+            })
+
+        def uav_set_mode():
+            data = request.get_json(
+                silent=True
+            ) or {}
+
+            mode = data.get("mode")
+
+            if (
+                not isinstance(mode, str)
+                or not mode.strip()
+            ):
+                return jsonify({
+                    "success": False,
+                    "message": (
+                        "set_mode requires a "
+                        "non-empty mode"
+                    ),
+                }), 400
+
+            return uav_command_response(
+                "set_mode",
+                {
+                    "mode": mode.strip().upper(),
+                },
+            )
+
+        def uav_takeoff():
+            data = request.get_json(
+                silent=True
+            ) or {}
+
+            altitude = data.get("altitude")
+
+            try:
+                altitude = float(altitude)
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+                return jsonify({
+                    "success": False,
+                    "message": (
+                        "takeoff requires a "
+                        "numeric altitude"
+                    ),
+                }), 400
+
+            return uav_command_response(
+                "takeoff",
+                {
+                    "altitude": altitude,
+                },
+            )
+
+        def uav_set_autonomy():
+            data = request.get_json(
+                silent=True
+            ) or {}
+
+            enabled = data.get("enabled")
+
+            if not isinstance(enabled, bool):
+                return jsonify({
+                    "success": False,
+                    "message": (
+                        "set_autonomy requires "
+                        "boolean enabled"
+                    ),
+                }), 400
+
+            return uav_command_response(
+                "set_autonomy",
+                {
+                    "enabled": enabled,
+                },
+            )
+
+        app.add_url_rule(
+            "/api/uav/arm",
+            endpoint="uav_arm",
+            view_func=lambda:
+                uav_command_response("arm"),
+            methods=["POST"],
+        )
+
+        app.add_url_rule(
+            "/api/uav/disarm",
+            endpoint="uav_disarm",
+            view_func=lambda:
+                uav_command_response("disarm"),
+            methods=["POST"],
+        )
+
+        app.add_url_rule(
+            "/api/uav/set_mode",
+            endpoint="uav_set_mode",
+            view_func=uav_set_mode,
+            methods=["POST"],
+        )
+
+        app.add_url_rule(
+            "/api/uav/takeoff",
+            endpoint="uav_takeoff",
+            view_func=uav_takeoff,
+            methods=["POST"],
+        )
+
+        app.add_url_rule(
+            "/api/uav/land",
+            endpoint="uav_land",
+            view_func=lambda:
+                uav_command_response("land"),
+            methods=["POST"],
+        )
+
+        app.add_url_rule(
+            "/api/uav/rtl",
+            endpoint="uav_rtl",
+            view_func=lambda:
+                uav_command_response("rtl"),
+            methods=["POST"],
+        )
+
+        app.add_url_rule(
+            "/api/uav/set_autonomy",
+            endpoint="uav_set_autonomy",
+            view_func=uav_set_autonomy,
+            methods=["POST"],
+        )
+
+        app.add_url_rule(
+            "/api/uav/reset_failsafe",
+            endpoint="uav_reset_failsafe",
+            view_func=lambda:
+                uav_command_response(
+                    "reset_failsafe"
+                ),
+            methods=["POST"],
         )
 
 

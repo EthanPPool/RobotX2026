@@ -13,8 +13,14 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import BatteryState, Imu, NavSatFix
 from std_msgs.msg import Float64
+from std_srvs.srv import Trigger
 
 from uav_interfaces.msg import AutonomyStatus, SafetyStatus
+from uav_interfaces.srv import (
+    SetAutonomy,
+    SetFlightMode,
+    Takeoff,
+)
 
 
 class UavDashboardBridge(Node):
@@ -25,6 +31,7 @@ class UavDashboardBridge(Node):
         self.lock = threading.RLock()
         self.client_lock = threading.RLock()
         self.send_lock = threading.RLock()
+        self.action_lock = threading.RLock()
 
         self.client_socket = None
 
@@ -148,6 +155,50 @@ class UavDashboardBridge(Node):
             "/vehicle/autonomy_status",
             self.autonomy_callback,
             10,
+        )
+
+        # ----------------------------------------------------
+        # Local guarded UAV command services
+        # ----------------------------------------------------
+
+        self.arm_client = self.create_client(
+            Trigger,
+            "/vehicle/arm",
+        )
+
+        self.disarm_client = self.create_client(
+            Trigger,
+            "/vehicle/disarm",
+        )
+
+        self.mode_client = self.create_client(
+            SetFlightMode,
+            "/vehicle/set_mode",
+        )
+
+        self.takeoff_client = self.create_client(
+            Takeoff,
+            "/vehicle/takeoff",
+        )
+
+        self.land_client = self.create_client(
+            Trigger,
+            "/vehicle/land",
+        )
+
+        self.rtl_client = self.create_client(
+            Trigger,
+            "/vehicle/rtl",
+        )
+
+        self.autonomy_client = self.create_client(
+            SetAutonomy,
+            "/vehicle/set_autonomy",
+        )
+
+        self.reset_failsafe_client = self.create_client(
+            Trigger,
+            "/safety/reset_failsafe",
         )
 
         # 5 Hz telemetry stream to Beeptop.
@@ -366,6 +417,246 @@ class UavDashboardBridge(Node):
             self.telemetry["autonomy_reason"] = str(msg.reason)
 
     # ========================================================
+    # GUARDED UAV COMMANDS
+    # ========================================================
+
+    @staticmethod
+    def wait_future(future, timeout=3.0):
+        deadline = time.monotonic() + timeout
+
+        while (
+            not future.done()
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.02)
+
+        return future.done()
+
+    def call_trigger(self, client, label):
+        if not client.wait_for_service(
+            timeout_sec=0.5
+        ):
+            return {
+                "success": False,
+                "message": f"{label} service unavailable",
+            }
+
+        future = client.call_async(
+            Trigger.Request()
+        )
+
+        if not self.wait_future(future):
+            return {
+                "success": False,
+                "message": f"{label} service timed out",
+            }
+
+        response = future.result()
+
+        if response is None:
+            return {
+                "success": False,
+                "message": f"{label} returned no response",
+            }
+
+        return {
+            "success": bool(response.success),
+            "message": str(response.message),
+        }
+
+    def call_set_mode(self, mode):
+        if not self.mode_client.wait_for_service(
+            timeout_sec=0.5
+        ):
+            return {
+                "success": False,
+                "message": "set_mode service unavailable",
+            }
+
+        request = SetFlightMode.Request()
+        request.mode = str(mode).strip().upper()
+
+        future = self.mode_client.call_async(
+            request
+        )
+
+        if not self.wait_future(future):
+            return {
+                "success": False,
+                "message": "set_mode service timed out",
+            }
+
+        response = future.result()
+
+        if response is None:
+            return {
+                "success": False,
+                "message": "set_mode returned no response",
+            }
+
+        return {
+            "success": bool(response.success),
+            "message": str(response.message),
+        }
+
+    def call_takeoff(self, altitude):
+        try:
+            altitude = float(altitude)
+        except (TypeError, ValueError):
+            return {
+                "success": False,
+                "message": "Invalid takeoff altitude",
+            }
+
+        if not math.isfinite(altitude):
+            return {
+                "success": False,
+                "message": "Invalid takeoff altitude",
+            }
+
+        if not self.takeoff_client.wait_for_service(
+            timeout_sec=0.5
+        ):
+            return {
+                "success": False,
+                "message": "takeoff service unavailable",
+            }
+
+        request = Takeoff.Request()
+        request.altitude = altitude
+
+        future = self.takeoff_client.call_async(
+            request
+        )
+
+        if not self.wait_future(future):
+            return {
+                "success": False,
+                "message": "takeoff service timed out",
+            }
+
+        response = future.result()
+
+        if response is None:
+            return {
+                "success": False,
+                "message": "takeoff returned no response",
+            }
+
+        return {
+            "success": bool(response.success),
+            "message": str(response.message),
+        }
+
+    def call_set_autonomy(self, enabled):
+        if not self.autonomy_client.wait_for_service(
+            timeout_sec=0.5
+        ):
+            return {
+                "success": False,
+                "message": "set_autonomy service unavailable",
+            }
+
+        request = SetAutonomy.Request()
+        request.enabled = bool(enabled)
+
+        future = self.autonomy_client.call_async(
+            request
+        )
+
+        if not self.wait_future(future):
+            return {
+                "success": False,
+                "message": "set_autonomy service timed out",
+            }
+
+        response = future.result()
+
+        if response is None:
+            return {
+                "success": False,
+                "message": "set_autonomy returned no response",
+            }
+
+        return {
+            "success": bool(response.success),
+            "message": str(response.message),
+        }
+
+    def execute_command(self, command, data):
+        command = str(command).strip().lower()
+        data = data if isinstance(data, dict) else {}
+
+        with self.action_lock:
+
+            if command == "arm":
+                return self.call_trigger(
+                    self.arm_client,
+                    "arm",
+                )
+
+            if command == "disarm":
+                return self.call_trigger(
+                    self.disarm_client,
+                    "disarm",
+                )
+
+            if command == "set_mode":
+                mode = data.get("mode")
+
+                if not mode:
+                    return {
+                        "success": False,
+                        "message": "set_mode requires mode",
+                    }
+
+                return self.call_set_mode(mode)
+
+            if command == "takeoff":
+                return self.call_takeoff(
+                    data.get("altitude")
+                )
+
+            if command == "land":
+                return self.call_trigger(
+                    self.land_client,
+                    "land",
+                )
+
+            if command == "rtl":
+                return self.call_trigger(
+                    self.rtl_client,
+                    "rtl",
+                )
+
+            if command == "set_autonomy":
+                if "enabled" not in data:
+                    return {
+                        "success": False,
+                        "message": (
+                            "set_autonomy requires enabled"
+                        ),
+                    }
+
+                return self.call_set_autonomy(
+                    data["enabled"]
+                )
+
+            if command == "reset_failsafe":
+                return self.call_trigger(
+                    self.reset_failsafe_client,
+                    "reset_failsafe",
+                )
+
+            return {
+                "success": False,
+                "message": (
+                    f"Unsupported UAV command: {command}"
+                ),
+            }
+
+
+    # ========================================================
     # TELEMETRY
     # ========================================================
 
@@ -517,15 +808,27 @@ class UavDashboardBridge(Node):
                         )
 
                         if message.get("type") == "command":
+                            result = self.execute_command(
+                                message.get("command"),
+                                message.get("data", {}),
+                            )
+
                             self.send_json({
                                 "type": "response",
                                 "request_id": message.get(
                                     "request_id"
                                 ),
-                                "success": False,
-                                "message": (
-                                    "UAV bridge is telemetry-only; "
-                                    "remote flight commands disabled"
+                                "success": bool(
+                                    result.get(
+                                        "success",
+                                        False,
+                                    )
+                                ),
+                                "message": str(
+                                    result.get(
+                                        "message",
+                                        "",
+                                    )
                                 ),
                             })
 
