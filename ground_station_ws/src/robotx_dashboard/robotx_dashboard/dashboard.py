@@ -18,6 +18,7 @@ from boat_interfaces.msg import DetectedObjectArray, Gate
 from robotx_dashboard.vehicle_manager import VehicleManager
 from robotx_dashboard.clients.boat_client import BoatClient
 from robotx_dashboard.clients.uav_client import UavClient
+from robotx_dashboard.clients.robocommand_client import RoboCommandClient
 
 
 # ============================================================
@@ -431,6 +432,60 @@ HTML = r"""
             }
         }
 
+        /* ==================================================
+           ROBOCOMMAND
+           ================================================== */
+
+        .rc-grid {
+            display: grid;
+            grid-template-columns:
+                repeat(auto-fit, minmax(300px, 1fr));
+            gap: 18px;
+        }
+
+        .rc-wide {
+            grid-column: 1 / -1;
+        }
+
+        .rc-traffic-grid {
+            display: grid;
+            grid-template-columns:
+                repeat(auto-fit, minmax(420px, 1fr));
+            gap: 18px;
+        }
+
+        .rc-log {
+            max-height: 55vh;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        .rc-entry {
+            padding: 8px 0;
+            border-bottom: 1px solid #283744;
+        }
+
+        .rc-entry summary {
+            cursor: pointer;
+            line-height: 1.4;
+        }
+
+        .rc-entry pre {
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            background: #10171e;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        .rc-actions {
+            display: grid;
+            grid-template-columns:
+                repeat(auto-fit, minmax(180px, 1fr));
+            gap: 10px;
+        }
+
 </style>
 </head>
 
@@ -448,6 +503,11 @@ HTML = r"""
             data-page="map-page">
         Overview Map
     </button>
+
+    <button class="tab"
+            data-page="robocommand-page">
+        RoboCommand
+    </button>
 </div>
 
 <div id="map-page"
@@ -457,6 +517,205 @@ HTML = r"""
 
     <div id="summary">
         Waiting for telemetry...
+    </div>
+</div>
+
+
+<div id="robocommand-page"
+     class="page">
+
+    <div class="rc-grid">
+
+        <div class="card">
+            <h2>RoboCommand Connection</h2>
+
+            <div class="row">
+                <span>Status</span>
+                <span class="value"
+                      id="rc-status">
+                    DISCONNECTED
+                </span>
+            </div>
+
+            <div class="row">
+                <span>Broker</span>
+                <span class="value"
+                      id="rc-broker">
+                    --
+                </span>
+            </div>
+
+            <div class="row">
+                <span>Team ID</span>
+                <span class="value"
+                      id="rc-team">
+                    --
+                </span>
+            </div>
+
+            <div class="row">
+                <span>Last RX</span>
+                <span class="value"
+                      id="rc-last-rx">
+                    --
+                </span>
+            </div>
+
+            <div class="row">
+                <span>Last TX</span>
+                <span class="value"
+                      id="rc-last-tx">
+                    --
+                </span>
+            </div>
+        </div>
+
+
+        <div class="card">
+            <h2>Course / Run</h2>
+
+            <div class="row">
+                <span>Course ID</span>
+                <span class="value"
+                      id="rc-course">
+                    --
+                </span>
+            </div>
+
+            <div class="row">
+                <span>Pinger</span>
+                <span class="value"
+                      id="rc-pinger">
+                    --
+                </span>
+            </div>
+
+            <div class="row">
+                <span>Run State</span>
+                <span class="value"
+                      id="rc-run-state">
+                    WAITING
+                </span>
+            </div>
+
+            <div class="row">
+                <span>Declaration Seq</span>
+                <span class="value"
+                      id="rc-declaration-seq">
+                    --
+                </span>
+            </div>
+
+            <div class="row">
+                <span>Run ID</span>
+                <span class="value"
+                      id="rc-run-id">
+                    --
+                </span>
+            </div>
+
+            <div class="row">
+                <span>Last Command</span>
+                <span class="value"
+                      id="rc-last-command">
+                    --
+                </span>
+            </div>
+        </div>
+
+
+        <div class="card">
+            <h2>Vehicle Reports</h2>
+
+            <div class="row">
+                <span>USV1 State</span>
+                <span class="value"
+                      id="rc-usv-state">
+                    UNKNOWN
+                </span>
+            </div>
+
+            <div class="row">
+                <span>USV1 Last Heartbeat</span>
+                <span class="value"
+                      id="rc-usv-age">
+                    --
+                </span>
+            </div>
+
+            <div class="row">
+                <span>UAV1 State</span>
+                <span class="value"
+                      id="rc-uav-state">
+                    UNKNOWN
+                </span>
+            </div>
+
+            <div class="row">
+                <span>UAV1 Last Heartbeat</span>
+                <span class="value"
+                      id="rc-uav-age">
+                    --
+                </span>
+            </div>
+        </div>
+
+
+        <div class="card">
+            <h2>OCS Actions</h2>
+
+            <div class="rc-actions">
+
+                <button
+                    class="control-button enable-button"
+                    onclick="rcSendDeclaration()">
+                    SEND RUN DECLARATION
+                </button>
+
+                <button
+                    class="control-button reset-button"
+                    onclick="rcReconnect()">
+                    RECONNECT
+                </button>
+
+                <button
+                    class="control-button"
+                    onclick="rcClearHistory()">
+                    CLEAR DISPLAY LOG
+                </button>
+
+            </div>
+
+            <div class="control-message"
+                 id="rc-action-message">
+                No RoboCommand action sent.
+            </div>
+        </div>
+
+
+        <div class="rc-wide rc-traffic-grid">
+
+            <div class="card">
+                <h2>Incoming from RoboCommand</h2>
+
+                <div class="rc-log"
+                     id="rc-rx-log">
+                    No messages received.
+                </div>
+            </div>
+
+
+            <div class="card">
+                <h2>Outgoing to RoboCommand</h2>
+
+                <div class="rc-log"
+                     id="rc-tx-log">
+                    No messages sent.
+                </div>
+            </div>
+
+        </div>
+
     </div>
 </div>
 
@@ -2863,6 +3122,306 @@ async function refresh() {
 }
 
 
+function rcEscape(value) {
+    return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+}
+
+
+function rcAge(value) {
+
+    if (
+        value === null
+        || value === undefined
+        || !Number.isFinite(Number(value))
+    ) {
+        return "--";
+    }
+
+    return `${Number(value).toFixed(1)} s`;
+}
+
+
+function rcTrafficHtml(entries) {
+
+    if (!Array.isArray(entries) || entries.length === 0) {
+        return "No messages.";
+    }
+
+    return entries.map(entry => {
+
+        const vehicle =
+            entry.vehicle
+                ? ` [${rcEscape(entry.vehicle)}]`
+                : "";
+
+        const detail =
+            rcEscape(
+                JSON.stringify(
+                    entry.detail ?? {},
+                    null,
+                    2
+                )
+            );
+
+        return `
+            <details class="rc-entry">
+                <summary>
+                    ${rcEscape(entry.time)}
+                    ${vehicle}
+                    ${rcEscape(entry.type)}
+                    —
+                    ${rcEscape(entry.summary)}
+                </summary>
+
+                <pre>${detail}</pre>
+            </details>
+        `;
+    }).join("");
+}
+
+
+function rcSetStatus(connected) {
+
+    const element =
+        document.getElementById(
+            "rc-status"
+        );
+
+    if (!element) {
+        return;
+    }
+
+    element.textContent =
+        connected
+            ? "CONNECTED"
+            : "DISCONNECTED";
+
+    element.className =
+        "value "
+        + (
+            connected
+                ? "connected"
+                : "disconnected"
+        );
+}
+
+
+async function refreshRoboCommand() {
+
+    try {
+
+        const response =
+            await fetch(
+                "/api/robocommand",
+                {
+                    cache: "no-store"
+                }
+            );
+
+        const rc =
+            await response.json();
+
+        rcSetStatus(
+            Boolean(rc.connected)
+        );
+
+        setText(
+            "rc-broker",
+            rc.broker ?? "--"
+        );
+
+        setText(
+            "rc-team",
+            rc.team_id ?? "--"
+        );
+
+        setText(
+            "rc-course",
+            rc.course_id ?? "--"
+        );
+
+        setText(
+            "rc-pinger",
+            rc.pinger_freq_hz == null
+                ? "--"
+                : `${rc.pinger_freq_hz} Hz`
+        );
+
+        setText(
+            "rc-run-state",
+            rc.run_state ?? "WAITING"
+        );
+
+        setText(
+            "rc-declaration-seq",
+            rc.declaration_seq ?? "--"
+        );
+
+        setText(
+            "rc-run-id",
+            rc.run_id ?? "--"
+        );
+
+        setText(
+            "rc-last-command",
+            rc.last_command ?? "--"
+        );
+
+        setText(
+            "rc-last-rx",
+            rcAge(rc.last_rx_age_sec)
+        );
+
+        setText(
+            "rc-last-tx",
+            rcAge(rc.last_tx_age_sec)
+        );
+
+        const reports =
+            rc.vehicle_reports ?? {};
+
+        const usv =
+            reports.USV1 ?? {};
+
+        const uav =
+            reports.UAV1 ?? {};
+
+        setText(
+            "rc-usv-state",
+            usv.state ?? "UNKNOWN"
+        );
+
+        setText(
+            "rc-usv-age",
+            rcAge(
+                usv.last_tx_age_sec
+            )
+        );
+
+        setText(
+            "rc-uav-state",
+            uav.state ?? "UNKNOWN"
+        );
+
+        setText(
+            "rc-uav-age",
+            rcAge(
+                uav.last_tx_age_sec
+            )
+        );
+
+        const rx =
+            document.getElementById(
+                "rc-rx-log"
+            );
+
+        if (rx) {
+            rx.innerHTML =
+                rcTrafficHtml(
+                    rc.rx_history
+                );
+        }
+
+        const tx =
+            document.getElementById(
+                "rc-tx-log"
+            );
+
+        if (tx) {
+            tx.innerHTML =
+                rcTrafficHtml(
+                    rc.tx_history
+                );
+        }
+
+    } catch (error) {
+
+        rcSetStatus(false);
+
+    }
+}
+
+
+async function rcPost(path) {
+
+    const messageBox =
+        document.getElementById(
+            "rc-action-message"
+        );
+
+    try {
+
+        const response =
+            await fetch(
+                path,
+                {
+                    method: "POST",
+                    cache: "no-store"
+                }
+            );
+
+        const result =
+            await response.json();
+
+        if (messageBox) {
+            messageBox.textContent =
+                result.message
+                ?? "No response.";
+        }
+
+        await refreshRoboCommand();
+
+        return result;
+
+    } catch (error) {
+
+        if (messageBox) {
+            messageBox.textContent =
+                String(error);
+        }
+
+        return {
+            success: false,
+            message: String(error)
+        };
+    }
+}
+
+
+async function rcSendDeclaration() {
+    await rcPost(
+        "/api/robocommand/run_declaration"
+    );
+}
+
+
+async function rcReconnect() {
+    await rcPost(
+        "/api/robocommand/reconnect"
+    );
+}
+
+
+async function rcClearHistory() {
+    await rcPost(
+        "/api/robocommand/clear_history"
+    );
+}
+
+
+refreshRoboCommand();
+
+setInterval(
+    refreshRoboCommand,
+    500
+);
+
+
+
 installTabHandlers();
 
 refresh();
@@ -2946,6 +3505,27 @@ class RobotXDashboard(Node):
         )
 
         self.uav_client.start()
+
+        # ----------------------------------------------------
+        # RoboCommand OCS interface
+        # ----------------------------------------------------
+        #
+        # Beeptop is the OCS. Only Beeptop connects to the
+        # RoboCommand MQTT network. USV/UAV remain on our
+        # internal vehicle TCP transports.
+
+        self.robocommand_client = RoboCommandClient(
+            vehicle_snapshot=self.snapshot,
+        )
+
+        self.robocommand_client.start()
+
+        self.get_logger().info(
+            "RoboCommand OCS client configured for "
+            f"{self.robocommand_client.host}:"
+            f"{self.robocommand_client.port} "
+            f"team={self.robocommand_client.team_id}"
+        )
 
         for vehicle_id, spec in VEHICLES.items():
 
@@ -3068,6 +3648,9 @@ class RobotXDashboard(Node):
 
         if hasattr(self, "uav_client"):
             self.uav_client.stop()
+
+        if hasattr(self, "robocommand_client"):
+            self.robocommand_client.stop()
 
         return super().destroy_node()
 
@@ -3903,6 +4486,93 @@ def api_vehicles():
 
     return jsonify(
         dashboard_node.snapshot()
+    )
+
+
+
+@app.route("/api/robocommand")
+def api_robocommand():
+
+    if (
+        dashboard_node is None
+        or not hasattr(
+            dashboard_node,
+            "robocommand_client",
+        )
+    ):
+        return jsonify({
+            "connected": False,
+        })
+
+    return jsonify(
+        dashboard_node
+        .robocommand_client
+        .snapshot()
+    )
+
+
+@app.route(
+    "/api/robocommand/run_declaration",
+    methods=["POST"],
+)
+def api_robocommand_run_declaration():
+
+    if dashboard_node is None:
+        return jsonify({
+            "success": False,
+            "message": (
+                "Dashboard node unavailable."
+            ),
+        }), 503
+
+    result = (
+        dashboard_node
+        .robocommand_client
+        .send_run_declaration()
+    )
+
+    return jsonify(result)
+
+
+@app.route(
+    "/api/robocommand/reconnect",
+    methods=["POST"],
+)
+def api_robocommand_reconnect():
+
+    if dashboard_node is None:
+        return jsonify({
+            "success": False,
+            "message": (
+                "Dashboard node unavailable."
+            ),
+        }), 503
+
+    return jsonify(
+        dashboard_node
+        .robocommand_client
+        .reconnect()
+    )
+
+
+@app.route(
+    "/api/robocommand/clear_history",
+    methods=["POST"],
+)
+def api_robocommand_clear_history():
+
+    if dashboard_node is None:
+        return jsonify({
+            "success": False,
+            "message": (
+                "Dashboard node unavailable."
+            ),
+        }), 503
+
+    return jsonify(
+        dashboard_node
+        .robocommand_client
+        .clear_history()
     )
 
 

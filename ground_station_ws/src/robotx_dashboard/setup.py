@@ -6,6 +6,7 @@ setup(
     name=package_name,
     version='0.1.0',
     packages=find_packages(exclude=['test']),
+    py_modules=['common_pb2'],
     data_files=[
         (
             'share/ament_index/resource_index/packages',
@@ -16,7 +17,11 @@ setup(
             ['package.xml'],
         ),
     ],
-    install_requires=['setuptools'],
+    install_requires=[
+        'setuptools',
+        'paho-mqtt>=2.1,<3',
+        'protobuf>=7.35,<8',
+    ],
     zip_safe=True,
     maintainer='RobotX Team',
     maintainer_email='robotx@localhost',
