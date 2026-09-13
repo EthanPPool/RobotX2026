@@ -160,7 +160,11 @@ class BoatClient(BaseVehicleClient):
                     timeout=3.0,
                 )
 
-                sock.settimeout(None)
+                # Vehicle bridges normally transmit telemetry
+                # at 5 Hz.  Do not allow a half-open TCP session
+                # to remain connected forever if application
+                # telemetry stops arriving.
+                sock.settimeout(3.0)
 
                 with self._socket_lock:
                     self._socket = sock

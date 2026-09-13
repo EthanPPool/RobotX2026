@@ -202,11 +202,17 @@ class BoatDashboardBridge(Node):
             self.publish_operator_command,
         )
 
-        # 5 Hz output to ground station
-        self.create_timer(
-            0.2,
-            self.publish_telemetry,
+        # 5 Hz output to ground station.
+        #
+        # Keep this independent of the ROS executor so heavy
+        # MAVROS/perception callback traffic cannot starve the
+        # Beeptop telemetry stream.
+        self.telemetry_thread = threading.Thread(
+            target=self.telemetry_loop,
+            daemon=True,
+            name="dashboard-telemetry",
         )
+        self.telemetry_thread.start()
 
         self.server_thread = threading.Thread(
             target=self.server_loop,
@@ -1368,6 +1374,29 @@ class BoatDashboardBridge(Node):
     # ========================================================
     # TELEMETRY
     # ========================================================
+
+    def telemetry_loop(self):
+        period = 0.2
+
+        while rclpy.ok():
+            start = time.monotonic()
+
+            try:
+                self.publish_telemetry()
+
+            except Exception as exc:
+                self.get_logger().warn(
+                    f"Telemetry send loop error: {exc}"
+                )
+
+            elapsed = time.monotonic() - start
+
+            time.sleep(
+                max(
+                    0.01,
+                    period - elapsed,
+                )
+            )
 
     def publish_telemetry(self):
         now = time.monotonic()
