@@ -79,6 +79,19 @@ class VehicleManager:
                 "bridge_yaw": 0.0,
                 "bridge_last_rx": None,
 
+                # Jetson-local mission diagnostic logger.
+                "log_state": "UNAVAILABLE",
+                "log_pending": False,
+                "log_recording": False,
+                "log_mission_id": None,
+                "log_label": "",
+                "log_file_path": None,
+                "log_row_count": 0,
+                "log_buffer_rows": 0,
+                "log_last_end_reason": None,
+                "log_last_error": None,
+                "logger_last_rx": None,
+
                 # Jetson-side control/safety authority.
                 "bridge_alive": False,
                 "control_ready": False,
@@ -164,6 +177,7 @@ class VehicleManager:
                     "velocity_age_sec",
                     "safety_age_sec",
                     "autonomy_age_sec",
+                    "logger_age_sec",
                 ):
                     continue
 
@@ -242,6 +256,20 @@ class VehicleManager:
                     now - max(
                         0.0,
                         float(bridge_age),
+                    )
+                )
+
+            logger_age = fields.get(
+                "logger_age_sec"
+            )
+
+            if logger_age is None:
+                state["logger_last_rx"] = None
+            else:
+                state["logger_last_rx"] = (
+                    now - max(
+                        0.0,
+                        float(logger_age),
                     )
                 )
 

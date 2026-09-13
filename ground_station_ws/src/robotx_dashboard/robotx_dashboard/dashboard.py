@@ -291,6 +291,23 @@ HTML = r"""
             overflow-wrap: anywhere;
         }
 
+        .log-label-input {
+            width: 100%;
+            margin-top: 8px;
+            padding: 10px;
+            border: 1px solid #46596b;
+            border-radius: 5px;
+            background: #10171e;
+            color: #e8edf2;
+            font-family: monospace;
+        }
+
+        .log-path {
+            max-width: 62%;
+            text-align: right;
+            overflow-wrap: anywhere;
+        }
+
         .mission-state-display {
             font-family: monospace;
             font-weight: bold;
@@ -1040,12 +1057,47 @@ function makeVehiclePage(id, vehicle) {
                     ENABLE AUTONOMY
                 </button>
 
+                <label for="${id}-log-label"
+                       style="display:block; margin-top:14px;">
+                    Test label (optional)
+                </label>
+
+                <input
+                    class="log-label-input"
+                    id="${id}-log-label"
+                    maxlength="40"
+                    placeholder="precal, water, parkinglot">
+
                 <button
                     class="control-button reset-button"
                     id="${id}-reset-button"
                     onclick="usvControlAction('reset_mission')">
                     RESET MISSION
                 </button>
+
+                <div class="row" style="margin-top:12px;">
+                    <span>Diagnostic Log</span>
+                    <span class="value"
+                          id="${id}-log-state">
+                        UNAVAILABLE
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Mission / Rows</span>
+                    <span class="value"
+                          id="${id}-log-progress">
+                        --
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Jetson File</span>
+                    <span class="value log-path"
+                          id="${id}-log-file">
+                        --
+                    </span>
+                </div>
 
 
                 <div class="switch-row">
@@ -1936,6 +1988,37 @@ function updateVehicle(id, vehicle) {
                 : "OFF"
         );
 
+        setText(
+            `${id}-log-state`,
+            vehicle.logger_fresh
+                ? (vehicle.log_state ?? "IDLE")
+                : "UNAVAILABLE"
+        );
+
+        const missionNumber =
+            vehicle.log_mission_id === null
+                ? "pending"
+                : `#${vehicle.log_mission_id}`;
+
+        setText(
+            `${id}-log-progress`,
+            vehicle.log_pending
+                ? `pending / ${vehicle.log_buffer_rows ?? 0} buffered`
+                : `${missionNumber} / ${vehicle.log_row_count ?? 0} rows`
+        );
+
+        const logPath = vehicle.log_file_path;
+        setText(
+            `${id}-log-file`,
+            logPath
+                ? logPath.split("/").pop()
+                : (
+                    vehicle.log_last_end_reason
+                        ? `saved: ${vehicle.log_last_end_reason}`
+                        : "--"
+                )
+        );
+
 
         setText(
             `${id}-bridge-forward`,
@@ -2550,7 +2633,7 @@ function updateVehicle(id, vehicle) {
 
 
 
-async function postUsvControl(action) {
+async function postUsvControl(action, data = null) {
 
     const messageBox =
         document.getElementById(
@@ -2569,7 +2652,13 @@ async function postUsvControl(action) {
             `/api/usv/${action}`,
             {
                 method: "POST",
-                cache: "no-store"
+                cache: "no-store",
+                headers: data === null
+                    ? {}
+                    : {"Content-Type": "application/json"},
+                body: data === null
+                    ? null
+                    : JSON.stringify(data)
             }
         );
 
@@ -2612,6 +2701,8 @@ async function postUsvControl(action) {
 
 async function usvControlAction(action) {
 
+    let requestData = null;
+
     if (action === "arm") {
 
         if (!confirm(
@@ -2646,7 +2737,27 @@ async function usvControlAction(action) {
     }
 
 
-    await postUsvControl(action);
+    if (action === "reset_mission") {
+
+        const labelInput =
+            document.getElementById("boat-log-label");
+
+        const label = labelInput
+            ? labelInput.value.trim()
+            : "";
+
+        if (!confirm(
+            "Reset the mission and prepare a new diagnostic log? "
+            + "No file or mission number is created until the USV arms."
+        )) {
+            return;
+        }
+
+        requestData = {label: label};
+    }
+
+
+    await postUsvControl(action, requestData);
 }
 
 
@@ -3701,6 +3812,20 @@ class RobotXDashboard(Node):
 
             return jsonify(result)
 
+        def reset_mission_response():
+            data = request.get_json(
+                silent=True
+            ) or {}
+
+            if not isinstance(data, dict):
+                data = {}
+
+            return result_response(
+                lambda: self.execute_reset_mission(
+                    data.get("label", "")
+                )
+            )
+
         app.add_url_rule(
             "/api/operator_input",
             endpoint="operator_input",
@@ -3753,10 +3878,7 @@ class RobotXDashboard(Node):
         app.add_url_rule(
             "/api/usv/reset_mission",
             endpoint="usv_reset_mission",
-            view_func=lambda:
-                result_response(
-                    self.execute_reset_mission
-                ),
+            view_func=reset_mission_response,
             methods=["POST"]
         )
 
@@ -4253,6 +4375,11 @@ class RobotXDashboard(Node):
                     None
                 )
 
+                logger_rx = data.pop(
+                    "logger_last_rx",
+                    None
+                )
+
                 data["battery_fresh"] = bool(
                     battery_rx is not None
                     and now - battery_rx <= 3.0
@@ -4331,6 +4458,16 @@ class RobotXDashboard(Node):
                         and data["online"]
                     )
 
+                    data["logger_fresh"] = bool(
+                        logger_rx is not None
+                        and now - logger_rx <= 1.0
+                    )
+
+                    if not data["logger_fresh"]:
+                        data["log_state"] = "UNAVAILABLE"
+                        data["log_pending"] = False
+                        data["log_recording"] = False
+
                 else:
 
                     data["bridge_alive"] = False
@@ -4338,6 +4475,7 @@ class RobotXDashboard(Node):
                     data["software_stop"] = "---"
                     data["autonomy_enabled"] = False
                     data["can_enable"] = False
+                    data["logger_fresh"] = False
 
                 output[vehicle_id] = data
 
@@ -4370,6 +4508,7 @@ class RobotXDashboard(Node):
     def execute_remote_usv_command(
         self,
         command,
+        data=None,
     ):
 
         with self.action_lock:
@@ -4383,7 +4522,8 @@ class RobotXDashboard(Node):
 
             try:
                 result = self.boat_client.command(
-                    command
+                    command,
+                    data or {},
                 )
 
             except Exception as exc:
@@ -4457,10 +4597,11 @@ class RobotXDashboard(Node):
         )
 
 
-    def execute_reset_mission(self):
+    def execute_reset_mission(self, label=""):
 
         return self.execute_remote_usv_command(
-            "reset_mission"
+            "reset_mission",
+            {"label": str(label or "")},
         )
 
 

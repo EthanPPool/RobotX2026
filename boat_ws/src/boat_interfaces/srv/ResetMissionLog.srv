@@ -1,0 +1,7 @@
+string label
+---
+bool success
+string message
+string state
+int32 mission_id
+string file_path

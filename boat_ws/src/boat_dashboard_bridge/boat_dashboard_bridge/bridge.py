@@ -16,6 +16,7 @@ from std_msgs.msg import Bool, String
 from std_srvs.srv import SetBool, Trigger
 
 from boat_interfaces.msg import DetectedObjectArray, Gate
+from boat_interfaces.srv import ResetMissionLog
 
 
 class BoatDashboardBridge(Node):
@@ -39,6 +40,7 @@ class BoatDashboardBridge(Node):
         self.battery_last_rx = None
         self.gate_last_rx = None
         self.bridge_last_rx = None
+        self.logger_last_rx = None
 
         # Browser/Xbox operator input. Input arrives from
         # Beeptop over TCP and is republished locally on ROS.
@@ -80,6 +82,17 @@ class BoatDashboardBridge(Node):
 
             "bridge_forward": 0.0,
             "bridge_yaw": 0.0,
+
+            "log_state": "UNAVAILABLE",
+            "log_pending": False,
+            "log_recording": False,
+            "log_mission_id": None,
+            "log_label": "",
+            "log_file_path": None,
+            "log_row_count": 0,
+            "log_buffer_rows": 0,
+            "log_last_end_reason": None,
+            "log_last_error": None,
         }
 
         # MAVROS telemetry
@@ -154,6 +167,13 @@ class BoatDashboardBridge(Node):
             10,
         )
 
+        self.create_subscription(
+            String,
+            "/mission_logger/status",
+            self.logger_status_callback,
+            10,
+        )
+
         # Local control services. These are intentionally
         # executed on the Jetson so safety transactions do not
         # depend on the ground-station TCP link remaining alive.
@@ -180,6 +200,11 @@ class BoatDashboardBridge(Node):
         self.reset_client = self.create_client(
             Trigger,
             "/control/reset_mission",
+        )
+
+        self.logger_reset_client = self.create_client(
+            ResetMissionLog,
+            "/mission_logger/reset",
         )
 
         self.operator_pub = self.create_publisher(
@@ -369,6 +394,34 @@ class BoatDashboardBridge(Node):
             self.telemetry["bridge_yaw"] = float(
                 msg.twist.angular.z
             )
+
+    def logger_status_callback(self, msg):
+        try:
+            status = json.loads(msg.data)
+        except (TypeError, json.JSONDecodeError):
+            return
+
+        if not isinstance(status, dict):
+            return
+
+        mapping = {
+            "state": "log_state",
+            "pending": "log_pending",
+            "recording": "log_recording",
+            "mission_id": "log_mission_id",
+            "label": "log_label",
+            "file_path": "log_file_path",
+            "row_count": "log_row_count",
+            "buffer_rows": "log_buffer_rows",
+            "last_end_reason": "log_last_end_reason",
+            "last_error": "log_last_error",
+        }
+
+        with self.lock:
+            self.logger_last_rx = time.monotonic()
+            for source, destination in mapping.items():
+                if source in status:
+                    self.telemetry[destination] = status[source]
 
     # ========================================================
     # LOCAL STATUS / SERVICE HELPERS
@@ -619,6 +672,41 @@ class BoatDashboardBridge(Node):
             return (
                 False,
                 "Mission reset returned no response",
+            )
+
+        return (
+            bool(response.success),
+            str(response.message),
+        )
+
+    def call_logger_reset_service(
+        self,
+        label="",
+        timeout=2.0,
+    ):
+        if not self.logger_reset_client.wait_for_service(
+            timeout_sec=0.50
+        ):
+            return (
+                False,
+                "Diagnostic logger reset service unavailable",
+            )
+
+        request = ResetMissionLog.Request()
+        request.label = str(label or "")
+        future = self.logger_reset_client.call_async(request)
+
+        if not self.wait_future(future, timeout):
+            return (
+                False,
+                "Diagnostic logger reset timed out",
+            )
+
+        response = future.result()
+        if response is None:
+            return (
+                False,
+                "Diagnostic logger returned no response",
             )
 
         return (
@@ -1055,7 +1143,7 @@ class BoatDashboardBridge(Node):
                 + arm_msg,
             )
 
-    def execute_reset_mission(self):
+    def execute_reset_mission(self, label=""):
         with self.action_lock:
             stop_ok, stop_msg = (
                 self.execute_stop()
@@ -1065,16 +1153,22 @@ class BoatDashboardBridge(Node):
                 self.call_reset_service()
             )
 
+            logger_ok, logger_msg = (
+                self.call_logger_reset_service(label)
+            )
+
             if reset_ok:
                 self.control_state = (
                     "MISSION RESET / STOPPED"
                 )
 
             return (
-                stop_ok and reset_ok,
+                stop_ok and reset_ok and logger_ok,
                 stop_msg
                 + " | reset: "
-                + reset_msg,
+                + reset_msg
+                + " | logger: "
+                + logger_msg,
             )
 
     # ========================================================
@@ -1321,13 +1415,19 @@ class BoatDashboardBridge(Node):
             message.get("command", "")
         ).strip().lower()
 
+        command_data = message.get("data", {})
+        if not isinstance(command_data, dict):
+            command_data = {}
+
         handlers = {
             "stop": self.execute_stop,
             "clear_stop": self.execute_clear_stop,
             "enable": self.execute_enable,
             "arm": self.execute_arm,
             "disarm": self.execute_disarm,
-            "reset_mission": self.execute_reset_mission,
+            "reset_mission": lambda: self.execute_reset_mission(
+                command_data.get("label", "")
+            ),
         }
 
         handler = handlers.get(command)
@@ -1426,6 +1526,12 @@ class BoatDashboardBridge(Node):
                 None
                 if self.state_last_rx is None
                 else now - self.state_last_rx
+            )
+
+            data["logger_age_sec"] = (
+                None
+                if self.logger_last_rx is None
+                else now - self.logger_last_rx
             )
 
         status = self.local_status()

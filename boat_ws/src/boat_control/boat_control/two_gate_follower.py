@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import json
 import math
 
 import rclpy
@@ -169,6 +170,7 @@ class TwoGateFollower(Node):
 
         self.local_x = None
         self.local_y = None
+        self.local_yaw = None
 
         self.pass_arm_local_x = None
         self.pass_arm_local_y = None
@@ -187,6 +189,18 @@ class TwoGateFollower(Node):
             self.state_topic,
             10
         )
+
+        self.diagnostics_pub = self.create_publisher(
+            String,
+            '/control/diagnostics',
+            10
+        )
+
+        self.last_controller_reason = 'STARTING'
+        self.last_command_forward = 0.0
+        self.last_command_yaw = 0.0
+        self.last_heading_error = None
+        self.last_forward_allowed = False
 
         self.create_subscription(
             Gate,
@@ -271,7 +285,7 @@ class TwoGateFollower(Node):
         self.enabled = bool(request.data)
 
         if not self.enabled:
-            self.publish_zero()
+            self.publish_zero('FOLLOWER_DISABLED')
             self.publish_state(
                 'DISABLED: controller stopped'
             )
@@ -296,7 +310,7 @@ class TwoGateFollower(Node):
         response
     ):
         self.reset_mission()
-        self.publish_zero()
+        self.publish_zero('RESET_MISSION')
 
         response.success = True
         response.message = (
@@ -339,6 +353,20 @@ class TwoGateFollower(Node):
     def local_position_callback(self, msg):
         self.local_x = float(msg.pose.position.x)
         self.local_y = float(msg.pose.position.y)
+
+        q = msg.pose.orientation
+        siny_cosp = 2.0 * (
+            q.w * q.z
+            + q.x * q.y
+        )
+        cosy_cosp = 1.0 - 2.0 * (
+            q.y * q.y
+            + q.z * q.z
+        )
+        self.local_yaw = math.atan2(
+            siny_cosp,
+            cosy_cosp,
+        )
 
     def vehicle_motion_ready(self):
         state = self.vehicle_state
@@ -594,7 +622,139 @@ class TwoGateFollower(Node):
         self.state_pub.publish(msg)
         self.get_logger().info(text)
 
-    def publish_zero(self):
+    def publish_diagnostics(self, reason):
+        gate = self.last_gate
+        target_x = None
+        target_y = None
+        target_distance = None
+        tracked_port_x = None
+        tracked_port_y = None
+        tracked_starboard_x = None
+        tracked_starboard_y = None
+        tracked_midpoint_x = None
+        tracked_midpoint_y = None
+
+        if gate is not None:
+            target_x = 0.5 * (
+                float(gate.left_marker.x)
+                + float(gate.right_marker.x)
+            )
+            target_y = 0.5 * (
+                float(gate.left_marker.y)
+                + float(gate.right_marker.y)
+            )
+            target_distance = math.hypot(
+                target_x,
+                target_y,
+            )
+
+            if (
+                self.local_x is not None
+                and self.local_y is not None
+                and self.local_yaw is not None
+            ):
+                cosine = math.cos(self.local_yaw)
+                sine = math.sin(self.local_yaw)
+
+                def body_to_map(body_x, body_y):
+                    return (
+                        self.local_x
+                        + cosine * body_x
+                        - sine * body_y,
+                        self.local_y
+                        + sine * body_x
+                        + cosine * body_y,
+                    )
+
+                tracked_port_x, tracked_port_y = (
+                    body_to_map(
+                        float(gate.left_marker.x),
+                        float(gate.left_marker.y),
+                    )
+                )
+                (
+                    tracked_starboard_x,
+                    tracked_starboard_y,
+                ) = body_to_map(
+                    float(gate.right_marker.x),
+                    float(gate.right_marker.y),
+                )
+                (
+                    tracked_midpoint_x,
+                    tracked_midpoint_y,
+                ) = body_to_map(
+                    target_x,
+                    target_y,
+                )
+
+        data = {
+            'controller_reason': str(reason),
+            'follower_enabled': bool(self.enabled),
+            'current_gate': int(self.current_gate),
+            'gates_passed': int(self.gates_passed),
+            'mission_complete': bool(self.mission_complete),
+            'passage_armed': bool(self.passage_armed),
+            'lidar_approach_confirmed': bool(
+                self.lidar_approach_confirmed
+            ),
+            'close_gate_hits': int(self.close_gate_hits),
+            'travel_since_pass_arm': float(
+                self.travel_since_pass_arm()
+            ),
+            'gate_approach_since_pass_arm': float(
+                self.gate_approach_since_pass_arm()
+            ),
+            'target_body_x': target_x,
+            'target_body_y': target_y,
+            'target_distance': target_distance,
+            'gate_map_range_m': target_distance,
+            'tracked_port_x': tracked_port_x,
+            'tracked_port_y': tracked_port_y,
+            'tracked_starboard_x': tracked_starboard_x,
+            'tracked_starboard_y': tracked_starboard_y,
+            'tracked_midpoint_x': tracked_midpoint_x,
+            'tracked_midpoint_y': tracked_midpoint_y,
+            'heading_error_deg': (
+                None
+                if self.last_heading_error is None
+                else math.degrees(self.last_heading_error)
+            ),
+            'forward_angle_limit_deg': float(
+                self.forward_angle_limit_deg
+            ),
+            'forward_allowed': bool(
+                self.last_forward_allowed
+            ),
+            'follower_linear_x': float(
+                self.last_command_forward
+            ),
+            'follower_angular_z': float(
+                self.last_command_yaw
+            ),
+            # Live map coordinates above are diagnostic transforms.
+            # The current follower has no frozen PASS geometry.
+            # JSON null intentionally becomes a blank CSV value
+            # instead of a misleading zero.
+            'target_map_x': tracked_midpoint_x,
+            'target_map_y': tracked_midpoint_y,
+            'saved_midpoint_x': None,
+            'saved_midpoint_y': None,
+            'pass_normal_x': None,
+            'pass_normal_y': None,
+            'pass_target_x': None,
+            'pass_target_y': None,
+            'intergate_hold_active': None,
+            'intergate_resume_requested': None,
+        }
+
+        msg = String()
+        msg.data = json.dumps(
+            data,
+            separators=(',', ':'),
+        )
+        self.diagnostics_pub.publish(msg)
+
+    def publish_zero(self, reason='ZERO_REQUESTED'):
         msg = TwistStamped()
 
         msg.header.stamp = (
@@ -607,6 +767,11 @@ class TwoGateFollower(Node):
         msg.twist.angular.z = 0.0
 
         self.cmd_pub.publish(msg)
+        self.last_controller_reason = str(reason)
+        self.last_command_forward = 0.0
+        self.last_command_yaw = 0.0
+        self.last_forward_allowed = False
+        self.publish_diagnostics(reason)
 
     def publish_gate_command(self):
         gate = self.last_gate
@@ -659,6 +824,16 @@ class TwoGateFollower(Node):
             else 0.0
         )
 
+        reason = (
+            'PASSAGE_TARGET_AHEAD'
+            if self.passage_armed and forward != 0.0
+            else 'TRACKING_GATE'
+            if forward != 0.0
+            else 'PASSAGE_TARGET_OUTSIDE_FORWARD_ANGLE'
+            if self.passage_armed
+            else 'TRACK_TARGET_OUTSIDE_FORWARD_ANGLE'
+        )
+
         msg = TwistStamped()
 
         msg.header.stamp = (
@@ -682,14 +857,20 @@ class TwoGateFollower(Node):
         )
 
         self.cmd_pub.publish(msg)
+        self.last_controller_reason = reason
+        self.last_command_forward = float(forward)
+        self.last_command_yaw = float(yaw)
+        self.last_heading_error = float(heading_error)
+        self.last_forward_allowed = bool(forward != 0.0)
+        self.publish_diagnostics(reason)
 
     def update(self):
         if not self.enabled:
-            self.publish_zero()
+            self.publish_zero('FOLLOWER_DISABLED')
             return
 
         if self.mission_complete:
-            self.publish_zero()
+            self.publish_zero('MISSION_COMPLETE')
             return
 
         if self.gate_is_fresh():
@@ -722,7 +903,7 @@ class TwoGateFollower(Node):
                     f'{approach:.2f} m LiDAR approach'
                 )
 
-                self.publish_zero()
+                self.publish_zero('GATE_PASS_TRANSITION')
                 return
 
             if not self.lidar_approach_confirmed:
@@ -747,7 +928,11 @@ class TwoGateFollower(Node):
 
         # If perception disappears but the boat has not moved
         # enough, this is NOT a gate pass.
-        self.publish_zero()
+        self.publish_zero(
+            'PASSAGE_BLOCKED'
+            if self.passage_armed
+            else 'WAITING_FOR_FRESH_GATE'
+        )
 
 
 def main(args=None):
@@ -762,7 +947,7 @@ def main(args=None):
         pass
 
     finally:
-        node.publish_zero()
+        node.publish_zero('NODE_SHUTDOWN')
         node.destroy_node()
         rclpy.shutdown()
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import copy
+import json
 import signal
 import time
 
@@ -10,6 +11,7 @@ from mavros_msgs.msg import State
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.signals import SignalHandlerOptions
+from std_msgs.msg import String
 from std_srvs.srv import SetBool
 
 
@@ -90,6 +92,12 @@ class MavrosCommandBridge(Node):
         self.cmd_pub = self.create_publisher(
             TwistStamped,
             self.output_topic,
+            10
+        )
+
+        self.diagnostics_pub = self.create_publisher(
+            String,
+            '/vehicle/control_diagnostics',
             10
         )
 
@@ -176,33 +184,97 @@ class MavrosCommandBridge(Node):
 
         return response
 
+    def authorization_status(self):
+        """Return every authorization input and the first inhibit reason."""
+        software_estop = bool(
+            self.get_parameter('software_estop').value
+        )
+        autonomy_enabled = bool(
+            self.get_parameter('autonomy_enabled').value
+        )
+        state = self.vehicle_state
+        connected = bool(state is not None and state.connected)
+        armed = bool(state is not None and state.armed)
+        mode = str(state.mode) if state is not None else ''
+        mode_allowed = mode in self.allowed_modes
+
+        command_age = None
+        if self.last_command_time is not None:
+            command_age = (
+                self.get_clock().now() - self.last_command_time
+            ).nanoseconds / 1e9
+        command_fresh = bool(
+            self.last_command is not None
+            and command_age is not None
+            and command_age <= self.deadman_timeout
+        )
+
+        checks = (
+            (not software_estop, 'SOFTWARE_ESTOP'),
+            (autonomy_enabled, 'AUTONOMY_DISABLED'),
+            (state is not None, 'NO_MAVROS_STATE'),
+            (connected, 'MAVROS_DISCONNECTED'),
+            (armed, 'VEHICLE_DISARMED'),
+            (mode_allowed, 'MODE_NOT_ALLOWED'),
+            (self.last_command is not None, 'NO_COMMAND'),
+            (command_fresh, 'COMMAND_STALE'),
+        )
+        reason = 'AUTHORIZED'
+        authorized = True
+        for passed, failed_reason in checks:
+            if not passed:
+                reason = failed_reason
+                authorized = False
+                break
+
+        return {
+            'bridge_reason': reason,
+            'bridge_autonomy_enabled': autonomy_enabled,
+            'software_estop': software_estop,
+            'bridge_mavros_connected': connected,
+            'bridge_vehicle_armed': armed,
+            'bridge_mode': mode,
+            'bridge_mode_allowed': mode_allowed,
+            'bridge_command_fresh': command_fresh,
+            'bridge_output_authorized': authorized,
+            'bridge_input_age_s': command_age,
+        }
+
     def authorized(self) -> bool:
-        if bool(self.get_parameter('software_estop').value):
-            return False
+        return bool(
+            self.authorization_status()[
+                'bridge_output_authorized'
+            ]
+        )
 
-        if not bool(self.get_parameter('autonomy_enabled').value):
-            return False
+    def publish_diagnostics(self, status, output):
+        input_forward = None
+        input_yaw = None
+        if self.last_command is not None:
+            input_forward = float(
+                self.last_command.twist.linear.x
+            )
+            input_yaw = float(
+                self.last_command.twist.angular.z
+            )
 
-        if self.vehicle_state is None:
-            return False
-
-        if not self.vehicle_state.connected:
-            return False
-
-        if not self.vehicle_state.armed:
-            return False
-
-        if self.vehicle_state.mode not in self.allowed_modes:
-            return False
-
-        if self.last_command is None or self.last_command_time is None:
-            return False
-
-        age = (
-            self.get_clock().now() - self.last_command_time
-        ).nanoseconds / 1e9
-
-        return age <= self.deadman_timeout
+        data = dict(status)
+        data.update({
+            'bridge_input_linear_x': input_forward,
+            'bridge_input_angular_z': input_yaw,
+            'bridge_output_linear_x': float(
+                output.twist.linear.x
+            ),
+            'bridge_output_angular_z': float(
+                output.twist.angular.z
+            ),
+        })
+        msg = String()
+        msg.data = json.dumps(
+            data,
+            separators=(',', ':'),
+        )
+        self.diagnostics_pub.publish(msg)
 
     def make_zero(self) -> TwistStamped:
         out = TwistStamped()
@@ -244,8 +316,12 @@ class MavrosCommandBridge(Node):
         self.publish_zero()
 
     def update(self) -> None:
-        if not self.authorized():
-            self.publish_zero()
+        status = self.authorization_status()
+
+        if not status['bridge_output_authorized']:
+            out = self.make_zero()
+            self.cmd_pub.publish(out)
+            self.publish_diagnostics(status, out)
             return
 
         out = copy.deepcopy(self.last_command)
@@ -275,6 +351,7 @@ class MavrosCommandBridge(Node):
         )
 
         self.cmd_pub.publish(out)
+        self.publish_diagnostics(status, out)
 
 
 def main(args=None):
