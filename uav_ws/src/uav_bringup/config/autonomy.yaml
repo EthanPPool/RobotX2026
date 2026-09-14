@@ -75,3 +75,33 @@ target_mission:
     z_deadband: 0.15
     max_horizontal_speed: 0.75
     max_vertical_speed: 0.35
+
+uav_geofence:
+  ros__parameters:
+    enabled: true
+
+    state_topic: /mavros/mavros/state
+    gps_topic: /mavros/mavros/global_position/raw/fix
+    rtl_service: /vehicle/rtl
+
+    fence_latitudes:
+      - 30.000000
+      - 30.000000
+      - 30.001000
+      - 30.001000
+
+    fence_longitudes:
+      - -92.001000
+      - -92.000000
+      - -92.000000
+      - -92.001000
+
+    warning_margin_m: 5.0
+    gps_timeout: 2.0
+    breach_confirmations: 3
+    check_rate: 10.0
+  
+    warning_margin_m: 5.0
+    gps_timeout: 2.0
+    breach_confirmations: 3
+    check_rate: 10.0
