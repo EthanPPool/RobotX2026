@@ -21,6 +21,10 @@ def generate_launch_description():
         Node(
             package='uav_safety', executable='safety_supervisor',
             name='safety_supervisor', output='screen', parameters=[config]),
+
+        Node(
+            package='uav_safety', executable='uav_geofence',
+            name='uav_geofence', output='screen', parameters=[config]),
         Node(
             package='uav_vehicle', executable='vehicle_manager',
             name='vehicle_manager', output='screen', parameters=[config]),
