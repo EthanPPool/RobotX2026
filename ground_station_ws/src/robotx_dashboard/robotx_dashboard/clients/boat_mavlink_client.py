@@ -43,6 +43,9 @@ class BoatMavlinkClient(BaseVehicleClient):
         self.connection = None
 
         self.target_system = None
+        self.target_component = (
+            mavutil.mavlink.MAV_COMP_ID_AUTOPILOT1
+        )
         self.last_rx = None
 
     def start(self):
@@ -145,8 +148,19 @@ class BoatMavlinkClient(BaseVehicleClient):
                 message.get_srcSystem()
             )
 
-            # Latch onto the ArduPilot autopilot system rather
-            # than another MAVLink component or future GCS.
+            component_id = int(
+                message.get_srcComponent()
+            )
+
+            # Only the primary ArduPilot autopilot component
+            # is authoritative for USV state. Other MAVLink
+            # components may share the same system ID.
+            if (
+                component_id
+                != self.target_component
+            ):
+                continue
+
             if self.target_system is None:
 
                 if message_type != "HEARTBEAT":
