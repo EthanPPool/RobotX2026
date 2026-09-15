@@ -21,6 +21,7 @@ setup(
         'setuptools',
         'paho-mqtt>=2.1,<3',
         'protobuf>=7.35,<8',
+        'pymavlink>=2.4,<3',
     ],
     zip_safe=True,
     maintainer='RobotX Team',

@@ -17,6 +17,7 @@ from std_msgs.msg import String
 from boat_interfaces.msg import DetectedObjectArray, Gate
 from robotx_dashboard.vehicle_manager import VehicleManager
 from robotx_dashboard.clients.boat_client import BoatClient
+from robotx_dashboard.clients.boat_mavlink_client import BoatMavlinkClient
 from robotx_dashboard.clients.uav_client import UavClient
 from robotx_dashboard.clients.robocommand_client import RoboCommandClient
 
@@ -3590,7 +3591,7 @@ class RobotXDashboard(Node):
         # the Jetson's ROS 2 DDS graph.
         self.boat_client = BoatClient(
             "boat",
-            self.vehicle_manager.update_vehicle,
+            self.vehicle_manager.update_jetson_vehicle,
             host="192.168.2.20",
             port=8765,
             command_timeout=10.0,
@@ -3602,6 +3603,26 @@ class RobotXDashboard(Node):
         )
 
         self.boat_client.start()
+
+        # Direct autopilot telemetry path. This is deliberately
+        # receive-only; USV commands continue through the Jetson
+        # TCP bridge and its existing safety authorization.
+        self.boat_mavlink_client = BoatMavlinkClient(
+            "boat",
+            self.vehicle_manager.update_mavlink_vehicle,
+            link_offline_callback=(
+                self.vehicle_manager.mark_link_offline
+            ),
+            endpoint="udpin:0.0.0.0:14550",
+            rx_timeout=3.0,
+        )
+
+        self.boat_mavlink_client.start()
+
+        self.get_logger().info(
+            "Monitoring USV autopilot directly via "
+            "MAVLink UDP 0.0.0.0:14550"
+        )
 
         self.uav_client = UavClient(
             "uav",
@@ -4326,14 +4347,6 @@ class RobotXDashboard(Node):
 
                 data["age_sec"] = age
 
-                # Existing "online" continues to mean that the
-                # autopilot/MAVROS state is connected and fresh.
-                data["online"] = bool(
-                    data["connected"]
-                    and age is not None
-                    and age < 2.0
-                )
-
                 vehicle_link_rx = data.pop(
                     "vehicle_link_last_rx",
                     None
@@ -4345,20 +4358,119 @@ class RobotXDashboard(Node):
                     else now - vehicle_link_rx
                 )
 
-                data[
-                    "vehicle_link_age_sec"
-                ] = vehicle_link_age
-
-                data["vehicle_link"] = bool(
-                    data.get(
-                        "vehicle_link",
-                        False,
-                    )
-                    and
-                    vehicle_link_age is not None
-                    and
-                    vehicle_link_age < 2.0
+                jetson_link_rx = data.pop(
+                    "jetson_link_last_rx",
+                    None,
                 )
+
+                mavlink_link_rx = data.pop(
+                    "mavlink_link_last_rx",
+                    None,
+                )
+
+                jetson_link_age = (
+                    None
+                    if jetson_link_rx is None
+                    else now - jetson_link_rx
+                )
+
+                mavlink_link_age = (
+                    None
+                    if mavlink_link_rx is None
+                    else now - mavlink_link_rx
+                )
+
+                data[
+                    "jetson_link_age_sec"
+                ] = jetson_link_age
+
+                data[
+                    "mavlink_link_age_sec"
+                ] = mavlink_link_age
+
+                if vehicle_id == "boat":
+
+                    # TCP bridge normally publishes at 5 Hz.
+                    data["jetson_link"] = bool(
+                        data.get(
+                            "jetson_link",
+                            False,
+                        )
+                        and
+                        jetson_link_age is not None
+                        and
+                        jetson_link_age < 2.0
+                    )
+
+                    # Direct MAVLink is authoritative for
+                    # autopilot presence. Any accepted MAVLink
+                    # traffic refreshes this timestamp.
+                    data["mavlink_link"] = bool(
+                        data.get(
+                            "mavlink_link",
+                            False,
+                        )
+                        and
+                        mavlink_link_age is not None
+                        and
+                        mavlink_link_age < 3.0
+                    )
+
+                    data["vehicle_link"] = bool(
+                        data["jetson_link"]
+                        or data["mavlink_link"]
+                    )
+
+                    valid_link_ages = [
+                        value
+                        for value in (
+                            jetson_link_age,
+                            mavlink_link_age,
+                        )
+                        if value is not None
+                    ]
+
+                    data[
+                        "vehicle_link_age_sec"
+                    ] = (
+                        min(valid_link_ages)
+                        if valid_link_ages
+                        else None
+                    )
+
+                    # Communications PoR definition:
+                    # USV online = direct autopilot MAVLink alive.
+                    data["online"] = bool(
+                        data["mavlink_link"]
+                        and data["connected"]
+                    )
+
+                    # For the USV, age_sec represents the
+                    # authoritative autopilot transport age.
+                    data["age_sec"] = mavlink_link_age
+
+                else:
+
+                    data["online"] = bool(
+                        data["connected"]
+                        and age is not None
+                        and age < 2.0
+                    )
+
+                    data[
+                        "vehicle_link_age_sec"
+                    ] = vehicle_link_age
+
+                    data["vehicle_link"] = bool(
+                        data.get(
+                            "vehicle_link",
+                            False,
+                        )
+                        and
+                        vehicle_link_age is not None
+                        and
+                        vehicle_link_age < 2.0
+                    )
 
                 battery_rx = data.pop(
                     "battery_last_rx",
@@ -4434,7 +4546,17 @@ class RobotXDashboard(Node):
                     )
 
                     if not data["online"]:
-                        data["control_state"] = "OFFLINE"
+                        data["control_state"] = (
+                            "AUTOPILOT OFFLINE"
+                        )
+
+                    elif not data["jetson_link"]:
+                        # Vehicle remains visible through direct
+                        # MAVLink even if Jetson ROS/TCP is down.
+                        data["bridge_alive"] = False
+                        data["control_state"] = (
+                            "JETSON OFFLINE"
+                        )
 
                     data["software_stop"] = str(
                         data.get(
@@ -4456,10 +4578,12 @@ class RobotXDashboard(Node):
                             False,
                         )
                         and data["online"]
+                        and data["jetson_link"]
                     )
 
                     data["logger_fresh"] = bool(
-                        logger_rx is not None
+                        data["jetson_link"]
+                        and logger_rx is not None
                         and now - logger_rx <= 1.0
                     )
 

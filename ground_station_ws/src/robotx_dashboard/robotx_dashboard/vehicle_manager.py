@@ -25,9 +25,22 @@ class VehicleManager:
                 "name": spec["name"],
                 "type": spec["type"],
 
-                # Ground-station <-> vehicle transport
+                # Overall ground-station <-> vehicle transport.
+                # Kept for compatibility with the existing UI/API.
                 "vehicle_link": False,
                 "vehicle_link_last_rx": None,
+
+                # Source-specific USV links.
+                #
+                # jetson_link:
+                #   TCP dashboard/control bridge on the Jetson.
+                #
+                # mavlink_link:
+                #   Direct BlueOS/ArduPilot MAVLink stream.
+                "jetson_link": False,
+                "jetson_link_last_rx": None,
+                "mavlink_link": False,
+                "mavlink_link_last_rx": None,
 
                 # Autopilot / MAVROS state
                 "connected": False,
@@ -150,6 +163,40 @@ class VehicleManager:
         vehicle_id,
         fields,
     ):
+        self._update_vehicle_source(
+            vehicle_id,
+            fields,
+            source="vehicle",
+        )
+
+    def update_jetson_vehicle(
+        self,
+        vehicle_id,
+        fields,
+    ):
+        self._update_vehicle_source(
+            vehicle_id,
+            fields,
+            source="jetson",
+        )
+
+    def update_mavlink_vehicle(
+        self,
+        vehicle_id,
+        fields,
+    ):
+        self._update_vehicle_source(
+            vehicle_id,
+            fields,
+            source="mavlink",
+        )
+
+    def _update_vehicle_source(
+        self,
+        vehicle_id,
+        fields,
+        source,
+    ):
 
         with self.lock:
 
@@ -165,7 +212,44 @@ class VehicleManager:
             # Normal telemetry fields
             # ------------------------------------------------
 
+            # Direct MAVLink owns the USV autopilot state.
+            # Jetson TCP owns mission/control/perception/safety
+            # state and must not overwrite these fields.
+            mavlink_owned_fields = {
+                "connected",
+                "armed",
+                "mode",
+                "latitude",
+                "longitude",
+                "altitude",
+                "altitude_msl",
+                "relative_altitude",
+                "roll_deg",
+                "pitch_deg",
+                "yaw_deg",
+                "heading_deg",
+                "ground_speed",
+                "vertical_speed",
+                "velocity_north",
+                "velocity_east",
+                "velocity_up",
+                "guided",
+                "manual_input",
+                "system_status",
+                "voltage",
+                "battery_percent",
+                "battery_current",
+                "battery_remaining",
+            }
+
             for key, value in fields.items():
+
+                if (
+                    vehicle_id == "boat"
+                    and source == "jetson"
+                    and key in mavlink_owned_fields
+                ):
+                    continue
 
                 if key in (
                     "battery_age_sec",
@@ -189,6 +273,10 @@ class VehicleManager:
             # field populated for the existing map/UI.
             if (
                 fields.get("altitude_msl") is not None
+                and not (
+                    vehicle_id == "boat"
+                    and source == "jetson"
+                )
             ):
                 state["altitude"] = fields[
                     "altitude_msl"
@@ -197,7 +285,13 @@ class VehicleManager:
             # UAV bridge calls battery current simply
             # "current". Normalize it into the existing
             # shared state field.
-            if fields.get("current") is not None:
+            if (
+                fields.get("current") is not None
+                and not (
+                    vehicle_id == "boat"
+                    and source == "jetson"
+                )
+            ):
                 state["battery_current"] = fields[
                     "current"
                 ]
@@ -206,6 +300,23 @@ class VehicleManager:
             # Vehicle transport freshness
             # ------------------------------------------------
 
+            if (
+                vehicle_id == "boat"
+                and source == "jetson"
+            ):
+                state["jetson_link"] = True
+                state["jetson_link_last_rx"] = now
+
+            elif (
+                vehicle_id == "boat"
+                and source == "mavlink"
+            ):
+                state["mavlink_link"] = True
+                state["mavlink_link_last_rx"] = now
+
+            # Existing aggregate link remains populated for
+            # backwards compatibility. Snapshot logic will
+            # later derive it from the source-specific links.
             state["vehicle_link"] = True
             state["vehicle_link_last_rx"] = now
             state["last_rx"] = now
@@ -217,65 +328,67 @@ class VehicleManager:
             # Reconstruct equivalent local timestamps here.
             # ------------------------------------------------
 
-            battery_age = fields.get(
-                "battery_age_sec"
-            )
+            if source == "mavlink":
 
-            if battery_age is None:
-                state["battery_last_rx"] = None
-            else:
-                state["battery_last_rx"] = (
-                    now - max(
-                        0.0,
-                        float(battery_age),
+                # Direct battery messages do not carry a
+                # dashboard-relative age; receiving one now
+                # establishes freshness.
+                if any(
+                    key in fields
+                    for key in (
+                        "voltage",
+                        "battery_percent",
+                        "battery_current",
+                        "battery_remaining",
                     )
+                ):
+                    state["battery_last_rx"] = now
+
+            else:
+
+                freshness_fields = (
+                    (
+                        "battery_age_sec",
+                        "battery_last_rx",
+                    ),
+                    (
+                        "gate_age_sec",
+                        "gate_last_rx",
+                    ),
+                    (
+                        "bridge_age_sec",
+                        "bridge_last_rx",
+                    ),
+                    (
+                        "logger_age_sec",
+                        "logger_last_rx",
+                    ),
                 )
 
-            gate_age = fields.get(
-                "gate_age_sec"
-            )
+                for age_key, stamp_key in freshness_fields:
 
-            if gate_age is None:
-                state["gate_last_rx"] = None
-            else:
-                state["gate_last_rx"] = (
-                    now - max(
-                        0.0,
-                        float(gate_age),
-                    )
-                )
+                    # Do not erase an unrelated source timestamp
+                    # merely because this packet omitted its age.
+                    if age_key not in fields:
+                        continue
 
-            bridge_age = fields.get(
-                "bridge_age_sec"
-            )
+                    age = fields.get(age_key)
 
-            if bridge_age is None:
-                state["bridge_last_rx"] = None
-            else:
-                state["bridge_last_rx"] = (
-                    now - max(
-                        0.0,
-                        float(bridge_age),
-                    )
-                )
-
-            logger_age = fields.get(
-                "logger_age_sec"
-            )
-
-            if logger_age is None:
-                state["logger_last_rx"] = None
-            else:
-                state["logger_last_rx"] = (
-                    now - max(
-                        0.0,
-                        float(logger_age),
-                    )
-                )
+                    if age is None:
+                        state[stamp_key] = None
+                    else:
+                        state[stamp_key] = (
+                            now
+                            - max(
+                                0.0,
+                                float(age),
+                            )
+                        )
 
     def mark_link_offline(
         self,
         vehicle_id,
+        source=None,
     ):
 
         with self.lock:
@@ -283,9 +396,40 @@ class VehicleManager:
             if vehicle_id not in self.vehicles:
                 return
 
-            self.vehicles[
-                vehicle_id
-            ]["vehicle_link"] = False
+            state = self.vehicles[vehicle_id]
+
+            # Existing BoatClient calls this without a source.
+            # For the USV that means the Jetson TCP transport.
+            if source is None:
+                source = (
+                    "jetson"
+                    if vehicle_id == "boat"
+                    else "vehicle"
+                )
+
+            if (
+                vehicle_id == "boat"
+                and source == "jetson"
+            ):
+                state["jetson_link"] = False
+
+            elif (
+                vehicle_id == "boat"
+                and source == "mavlink"
+            ):
+                state["mavlink_link"] = False
+
+                # For the USV, direct MAVLink is the
+                # authoritative autopilot connection.
+                state["connected"] = False
+
+            if vehicle_id == "boat":
+                state["vehicle_link"] = bool(
+                    state["jetson_link"]
+                    or state["mavlink_link"]
+                )
+            else:
+                state["vehicle_link"] = False
 
     def snapshot_raw(self):
 
