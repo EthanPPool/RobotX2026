@@ -10,6 +10,7 @@ import os
 
 def generate_launch_description():
     fcu_url = LaunchConfiguration('fcu_url')
+    gcs_url = LaunchConfiguration('gcs_url')
 
     mavros_launch = os.path.join(
         get_package_share_directory('mavros'),
@@ -30,10 +31,20 @@ def generate_launch_description():
             description='Pixhawk MAVLink connection'
         ),
 
+        DeclareLaunchArgument(
+            'gcs_url',
+            default_value=(
+                'udp://0.0.0.0:14552@'
+                '192.168.2.100:14552'
+            ),
+            description='Beeptop RobotX GCS MAVLink connection'
+        ),
+
         IncludeLaunchDescription(
             AnyLaunchDescriptionSource(mavros_launch),
             launch_arguments={
                 'fcu_url': fcu_url,
+                'gcs_url': gcs_url,
                 'namespace': '/',
             }.items()
         ),

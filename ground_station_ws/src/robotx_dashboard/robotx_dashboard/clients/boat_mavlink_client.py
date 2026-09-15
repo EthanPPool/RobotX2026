@@ -1007,22 +1007,41 @@ class BoatMavlinkClient(BaseVehicleClient):
         )
 
     def _request_management_data(self):
+        """
+        Automatically initialize GCS management whenever an
+        ArduPilot connection is established.
+
+        Both USV and UAV use this exact same path:
+          - request actuator/PWM telemetry
+          - synchronize the complete FCU parameter cache
+          - recover missing parameter indices automatically
+
+        Parameter synchronization runs in its own thread so the
+        MAVLink receive loop remains responsive.
+        """
+
         if self.management_requested:
             return
 
         self.management_requested = True
 
-        # Read-only telemetry request.
+        # Start actuator telemetry.
         self._request_servo_output_stream()
 
-        # Populate the GCS parameter cache once per
-        # MAVLink connection. Subsequent manual Refresh
-        # requests use the same protocol.
-        self._send_parameter_list_request()
+        # Complete parameter synchronization in the background.
+        thread = threading.Thread(
+            target=self.refresh_parameters,
+            kwargs={
+                "timeout": 90.0,
+            },
+            name=(
+                f"{self.vehicle_id}-parameter-sync"
+            ),
+            daemon=True,
+        )
 
-    # ========================================================
-    # RECEIVE LOOP
-    # ========================================================
+        thread.start()
+
 
     def _run(self):
         while not self.stop_event.is_set():
