@@ -13,7 +13,7 @@ class BoatMavlinkClient(BaseVehicleClient):
     """
     Receive-only direct MAVLink client for the BlueBoat autopilot.
 
-    BlueOS/ArduPilot sends UDP MAVLink to Beeptop:14550.
+    BlueOS/ArduPilot sends UDP MAVLink to Beeptop:14551.
     This client does not send vehicle commands. Jetson TCP remains
     the command/control transport.
     """
@@ -23,7 +23,7 @@ class BoatMavlinkClient(BaseVehicleClient):
         vehicle_id,
         state_update_callback,
         link_offline_callback=None,
-        endpoint="udpin:0.0.0.0:14550",
+        endpoint="udpin:0.0.0.0:14551",
         rx_timeout=3.0,
     ):
         super().__init__(
