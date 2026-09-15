@@ -76,6 +76,11 @@ class VehicleManager:
                 "battery_remaining": None,
                 "battery_last_rx": None,
 
+                # Direct ArduPilot actuator telemetry.
+                "servo_outputs": {},
+                "servo_config": {},
+                "servo_output_last_rx": None,
+
                 "buoy_count": 0,
 
                 "gate_confidence": None,
@@ -240,6 +245,8 @@ class VehicleManager:
                 "battery_percent",
                 "battery_current",
                 "battery_remaining",
+                "servo_outputs",
+                "servo_config",
             }
 
             for key, value in fields.items():
@@ -343,6 +350,9 @@ class VehicleManager:
                     )
                 ):
                     state["battery_last_rx"] = now
+
+                if "servo_outputs" in fields:
+                    state["servo_output_last_rx"] = now
 
             else:
 

@@ -504,6 +504,127 @@ HTML = r"""
             gap: 10px;
         }
 
+
+        /* ==================================================
+           VEHICLE SUBTABS / PARAMETER EDITOR
+           ================================================== */
+
+        .vehicle-subtabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 18px;
+            border-bottom: 1px solid #344250;
+        }
+
+        .vehicle-subtab {
+            padding: 10px 18px;
+            border: 0;
+            border-bottom: 3px solid transparent;
+            background: transparent;
+            color: #9eacb9;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        .vehicle-subtab.active {
+            color: #ffffff;
+            border-bottom-color: #61d095;
+        }
+
+        .vehicle-panel {
+            display: none;
+        }
+
+        .vehicle-panel.active {
+            display: block;
+        }
+
+        .parameter-toolbar {
+            display: grid;
+            grid-template-columns:
+                minmax(240px, 1fr)
+                auto;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        .parameter-search,
+        .parameter-value-input {
+            padding: 9px 10px;
+            border: 1px solid #46596b;
+            border-radius: 5px;
+            background: #10171e;
+            color: #e8edf2;
+            font-family: monospace;
+        }
+
+        .parameter-value-input {
+            width: 150px;
+        }
+
+        .parameter-table-wrap {
+            width: 100%;
+            max-height: calc(100vh - 300px);
+            overflow: auto;
+            border: 1px solid #344250;
+            border-radius: 6px;
+        }
+
+        .parameter-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: monospace;
+            font-size: 13px;
+        }
+
+        .parameter-table th,
+        .parameter-table td {
+            padding: 9px 10px;
+            border-bottom: 1px solid #283744;
+            text-align: left;
+            white-space: nowrap;
+        }
+
+        .parameter-table th {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            background: #202d39;
+        }
+
+        .parameter-table tr:hover {
+            background: #202a34;
+        }
+
+        .parameter-name {
+            font-weight: bold;
+        }
+
+        .parameter-write-button {
+            padding: 7px 12px;
+            border: 1px solid #46596b;
+            border-radius: 5px;
+            background: #26384a;
+            color: #eeeeee;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .parameter-write-button:disabled {
+            opacity: 0.40;
+            cursor: not-allowed;
+        }
+
+        .parameter-status {
+            margin-bottom: 12px;
+            padding: 10px;
+            border: 1px solid #344250;
+            border-radius: 5px;
+            background: #10171e;
+            font-family: monospace;
+        }
+
 </style>
 </head>
 
@@ -755,6 +876,7 @@ L.tileLayer(
 
 const markers = {};
 const vehiclePages = {};
+const vehicleParameterState = {};
 
 let mapCentered = false;
 
@@ -979,6 +1101,36 @@ function makeVehiclePage(id, vehicle) {
                     <span class="value"
                           id="${id}-control-state">
                         OFFLINE
+                    </span>
+                </div>
+            </div>
+
+
+
+            <div class="card">
+                <h2>Thruster Outputs</h2>
+
+                <div class="row">
+                    <span>Port Thruster</span>
+                    <span class="value"
+                          id="${id}-port-thruster">
+                        --
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Starboard Thruster</span>
+                    <span class="value"
+                          id="${id}-starboard-thruster">
+                        --
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>PWM Telemetry</span>
+                    <span class="value"
+                          id="${id}-pwm-status">
+                        UNAVAILABLE
                     </span>
                 </div>
             </div>
@@ -1654,7 +1806,30 @@ function makeVehiclePage(id, vehicle) {
 
 
     page.innerHTML = `
-        <div class="vehicle-layout">
+        <div class="vehicle-subtabs">
+
+            <button
+                class="vehicle-subtab active"
+                id="${id}-status-tab"
+                onclick="selectVehicleSubtab('${id}', 'status')">
+                STATUS
+            </button>
+
+            <button
+                class="vehicle-subtab"
+                id="${id}-parameters-tab"
+                onclick="selectVehicleSubtab('${id}', 'parameters')">
+                PARAMETERS
+            </button>
+
+        </div>
+
+
+        <div
+            class="vehicle-panel active"
+            id="${id}-status-panel">
+
+            <div class="vehicle-layout">
 
             <div class="card">
                 <h2>Connection</h2>
@@ -1773,6 +1948,72 @@ function makeVehiclePage(id, vehicle) {
             ${usvCards}
             ${uavCards}
 
+            </div>
+        </div>
+
+
+        <div
+            class="vehicle-panel"
+            id="${id}-parameters-panel">
+
+            <div class="card">
+
+                <h2>${vehicle.name} Parameters</h2>
+
+                <div
+                    class="parameter-status"
+                    id="${id}-parameter-status">
+                    Open this tab to load parameters.
+                </div>
+
+                <div class="parameter-toolbar">
+
+                    <input
+                        class="parameter-search"
+                        id="${id}-parameter-search"
+                        placeholder="Search parameters..."
+                        oninput="renderVehicleParameters('${id}')">
+
+                    <button
+                        class="control-button"
+                        style="margin-top:0;"
+                        onclick="refreshVehicleParameters('${id}')">
+                        REFRESH ALL
+                    </button>
+
+                </div>
+
+                <div class="parameter-table-wrap">
+
+                    <table class="parameter-table">
+
+                        <thead>
+                            <tr>
+                                <th>Parameter</th>
+                                <th>Current</th>
+                                <th>Type</th>
+                                <th>New Value</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+
+                        <tbody
+                            id="${id}-parameter-table-body">
+
+                            <tr>
+                                <td colspan="5">
+                                    Parameters not loaded.
+                                </td>
+                            </tr>
+
+                        </tbody>
+
+                    </table>
+
+                </div>
+
+            </div>
+
         </div>
     `;
 
@@ -1783,6 +2024,569 @@ function makeVehiclePage(id, vehicle) {
 
     installTabHandlers();
 }
+
+
+
+function selectVehicleSubtab(
+    vehicleId,
+    tabName
+) {
+
+    const statusTab =
+        document.getElementById(
+            `${vehicleId}-status-tab`
+        );
+
+    const parameterTab =
+        document.getElementById(
+            `${vehicleId}-parameters-tab`
+        );
+
+    const statusPanel =
+        document.getElementById(
+            `${vehicleId}-status-panel`
+        );
+
+    const parameterPanel =
+        document.getElementById(
+            `${vehicleId}-parameters-panel`
+        );
+
+
+    const showParameters =
+        tabName === "parameters";
+
+
+    if (statusTab) {
+        statusTab.classList.toggle(
+            "active",
+            !showParameters
+        );
+    }
+
+    if (parameterTab) {
+        parameterTab.classList.toggle(
+            "active",
+            showParameters
+        );
+    }
+
+    if (statusPanel) {
+        statusPanel.classList.toggle(
+            "active",
+            !showParameters
+        );
+    }
+
+    if (parameterPanel) {
+        parameterPanel.classList.toggle(
+            "active",
+            showParameters
+        );
+    }
+
+
+    if (showParameters) {
+
+        const state =
+            vehicleParameterState[
+                vehicleId
+            ];
+
+        if (!state) {
+            loadVehicleParameters(
+                vehicleId
+            );
+        }
+    }
+}
+
+
+function parameterEscape(value) {
+
+    return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+}
+
+
+function parameterValueText(value) {
+
+    if (
+        value === null
+        || value === undefined
+    ) {
+        return "--";
+    }
+
+    const number = Number(value);
+
+    if (!Number.isFinite(number)) {
+        return String(value);
+    }
+
+    return String(number);
+}
+
+
+async function loadVehicleParameters(
+    vehicleId
+) {
+
+    const status =
+        document.getElementById(
+            `${vehicleId}-parameter-status`
+        );
+
+    if (status) {
+        status.textContent =
+            "Loading parameter cache...";
+    }
+
+
+    try {
+
+        const response = await fetch(
+            `/api/vehicles/${vehicleId}/parameters`,
+            {
+                cache: "no-store"
+            }
+        );
+
+        const data =
+            await response.json();
+
+        vehicleParameterState[
+            vehicleId
+        ] = data;
+
+
+        if (status) {
+
+            if (!data.available) {
+
+                status.textContent =
+                    data.message
+                    ?? "Parameter backend unavailable.";
+
+            } else {
+
+                status.textContent =
+                    `${data.count} / `
+                    + `${data.expected ?? "?"} parameters`
+                    + (
+                        data.write_allowed
+                            ? " | WRITES ENABLED"
+                            : " | WRITES LOCKED"
+                    );
+            }
+        }
+
+        renderVehicleParameters(
+            vehicleId
+        );
+
+    } catch (error) {
+
+        if (status) {
+            status.textContent =
+                "Parameter request failed: "
+                + error;
+        }
+    }
+}
+
+
+function renderVehicleParameters(
+    vehicleId
+) {
+
+    const body =
+        document.getElementById(
+            `${vehicleId}-parameter-table-body`
+        );
+
+    if (!body) {
+        return;
+    }
+
+
+    const state =
+        vehicleParameterState[
+            vehicleId
+        ];
+
+    if (!state) {
+
+        body.innerHTML = `
+            <tr>
+                <td colspan="5">
+                    Parameters not loaded.
+                </td>
+            </tr>
+        `;
+
+        return;
+    }
+
+
+    if (!state.available) {
+
+        body.innerHTML = `
+            <tr>
+                <td colspan="5">
+                    ${parameterEscape(
+                        state.message
+                        ?? "Backend unavailable."
+                    )}
+                </td>
+            </tr>
+        `;
+
+        return;
+    }
+
+
+    const search =
+        (
+            document.getElementById(
+                `${vehicleId}-parameter-search`
+            )?.value
+            ?? ""
+        )
+        .trim()
+        .toUpperCase();
+
+
+    const parameters =
+        Array.isArray(
+            state.parameters
+        )
+            ? state.parameters
+            : [];
+
+
+    const filtered =
+        parameters.filter(param => {
+
+            if (!search) {
+                return true;
+            }
+
+            return (
+                String(param.name)
+                    .toUpperCase()
+                    .includes(search)
+                ||
+                String(param.type_name ?? "")
+                    .toUpperCase()
+                    .includes(search)
+            );
+        });
+
+
+    if (filtered.length === 0) {
+
+        body.innerHTML = `
+            <tr>
+                <td colspan="5">
+                    No matching parameters.
+                </td>
+            </tr>
+        `;
+
+        return;
+    }
+
+
+    body.innerHTML =
+        filtered.map(param => {
+
+            const name =
+                String(param.name);
+
+            const value =
+                parameterValueText(
+                    param.value
+                );
+
+            const disabled =
+                state.write_allowed
+                    ? ""
+                    : "disabled";
+
+            return `
+                <tr>
+
+                    <td class="parameter-name">
+                        ${parameterEscape(name)}
+                    </td>
+
+                    <td>
+                        ${parameterEscape(value)}
+                    </td>
+
+                    <td>
+                        ${parameterEscape(
+                            param.type_name
+                            ?? param.type
+                            ?? "--"
+                        )}
+                    </td>
+
+                    <td>
+                        <input
+                            class="parameter-value-input"
+                            id="param-${vehicleId}-${name}"
+                            value="${parameterEscape(value)}"
+                            ${disabled}>
+                    </td>
+
+                    <td>
+                        <button
+                            class="parameter-write-button"
+                            ${disabled}
+                            onclick="
+                                writeVehicleParameter(
+                                    '${vehicleId}',
+                                    '${name}'
+                                )
+                            ">
+                            WRITE
+                        </button>
+                    </td>
+
+                </tr>
+            `;
+        }).join("");
+}
+
+
+async function refreshVehicleParameters(
+    vehicleId
+) {
+
+    const status =
+        document.getElementById(
+            `${vehicleId}-parameter-status`
+        );
+
+    if (status) {
+        status.textContent =
+            "Refreshing all parameters...";
+    }
+
+
+    try {
+
+        const response = await fetch(
+            `/api/vehicles/${vehicleId}/parameters/refresh`,
+            {
+                method: "POST",
+                cache: "no-store"
+            }
+        );
+
+        const result =
+            await response.json();
+
+        if (status) {
+            status.textContent =
+                result.message
+                ?? "Refresh complete.";
+        }
+
+        await loadVehicleParameters(
+            vehicleId
+        );
+
+    } catch (error) {
+
+        if (status) {
+            status.textContent =
+                "Refresh failed: "
+                + error;
+        }
+    }
+}
+
+
+async function writeVehicleParameter(
+    vehicleId,
+    parameterName
+) {
+
+    const state =
+        vehicleParameterState[
+            vehicleId
+        ];
+
+    const status =
+        document.getElementById(
+            `${vehicleId}-parameter-status`
+        );
+
+
+    if (
+        !state
+        || !state.write_allowed
+    ) {
+
+        if (status) {
+            status.textContent =
+                "Parameter writes are currently locked.";
+        }
+
+        return;
+    }
+
+
+    const input =
+        document.getElementById(
+            `param-${vehicleId}-${parameterName}`
+        );
+
+    if (!input) {
+        return;
+    }
+
+
+    const value =
+        Number(input.value);
+
+    if (!Number.isFinite(value)) {
+
+        if (status) {
+            status.textContent =
+                `${parameterName}: `
+                + "value must be numeric.";
+        }
+
+        return;
+    }
+
+
+    if (!confirm(
+        `Write ${parameterName} = ${value}?`
+        + "\n\n"
+        + "The value will be sent to the autopilot "
+        + "and verified by read-back."
+    )) {
+        return;
+    }
+
+
+    if (status) {
+        status.textContent =
+            `Writing ${parameterName}...`;
+    }
+
+
+    try {
+
+        const response = await fetch(
+            (
+                `/api/vehicles/${vehicleId}/`
+                + `parameters/${parameterName}`
+            ),
+            {
+                method: "POST",
+                cache: "no-store",
+                headers: {
+                    "Content-Type":
+                        "application/json"
+                },
+                body: JSON.stringify({
+                    value: value
+                })
+            }
+        );
+
+        const result =
+            await response.json();
+
+
+        if (status) {
+            status.textContent =
+                result.message
+                ?? (
+                    result.success
+                        ? "Parameter verified."
+                        : "Parameter write failed."
+                );
+        }
+
+
+        if (result.success) {
+
+            await loadVehicleParameters(
+                vehicleId
+            );
+        }
+
+    } catch (error) {
+
+        if (status) {
+            status.textContent =
+                "Parameter write failed: "
+                + error;
+        }
+    }
+}
+
+
+function formatThrusterOutput(
+    vehicle,
+    functionId
+) {
+
+    const config =
+        vehicle.servo_config
+        ?? {};
+
+    const outputs =
+        vehicle.servo_outputs
+        ?? {};
+
+
+    for (
+        const [channel, item]
+        of Object.entries(config)
+    ) {
+
+        if (
+            Number(item.function)
+            !== Number(functionId)
+        ) {
+            continue;
+        }
+
+
+        const pwm =
+            outputs[channel];
+
+        const pwmText =
+            pwm === null
+            || pwm === undefined
+                ? "--"
+                : `${pwm} µs`;
+
+
+        return (
+            `SERVO${channel} | `
+            + `${pwmText} | `
+            + `MIN ${item.min ?? "--"} / `
+            + `TRIM ${item.trim ?? "--"} / `
+            + `MAX ${item.max ?? "--"}`
+        );
+    }
+
+
+    return "NOT MAPPED";
+}
+
 
 
 function setText(id, value) {
@@ -1897,6 +2701,30 @@ function updateVehicle(id, vehicle) {
 
 
     if (vehicle.type === "USV") {
+
+        setText(
+            `${id}-port-thruster`,
+            formatThrusterOutput(
+                vehicle,
+                73
+            )
+        );
+
+        setText(
+            `${id}-starboard-thruster`,
+            formatThrusterOutput(
+                vehicle,
+                74
+            )
+        );
+
+        setText(
+            `${id}-pwm-status`,
+            vehicle.servo_output_fresh
+                ? "RECEIVING"
+                : "STALE / UNAVAILABLE"
+        );
+
 
         setText(
             `${id}-battery-current`,
@@ -3638,6 +4466,30 @@ class RobotXDashboard(Node):
 
         self.uav_client.start()
 
+        # Direct UAV autopilot management channel.
+        #
+        # MAVROS on the UAV companion forwards the Pixhawk
+        # MAVLink stream to Beeptop UDP 14552.
+        #
+        # This channel is used for GCS administration:
+        # parameters now, then fence/mission management.
+        #
+        # The normal UAV telemetry/control UI continues to use
+        # the guarded TCP bridge at port 8766.
+        self.uav_mavlink_client = BoatMavlinkClient(
+            "uav",
+            lambda vehicle_id, fields: None,
+            endpoint="udpin:0.0.0.0:14552",
+            rx_timeout=3.0,
+        )
+
+        self.uav_mavlink_client.start()
+
+        self.get_logger().info(
+            "Monitoring UAV autopilot management via "
+            "MAVLink UDP 0.0.0.0:14552"
+        )
+
         # ----------------------------------------------------
         # RoboCommand OCS interface
         # ----------------------------------------------------
@@ -3778,8 +4630,14 @@ class RobotXDashboard(Node):
         if hasattr(self, "boat_client"):
             self.boat_client.stop()
 
+        if hasattr(self, "boat_mavlink_client"):
+            self.boat_mavlink_client.stop()
+
         if hasattr(self, "uav_client"):
             self.uav_client.stop()
+
+        if hasattr(self, "uav_mavlink_client"):
+            self.uav_mavlink_client.stop()
 
         if hasattr(self, "robocommand_client"):
             self.robocommand_client.stop()
@@ -3902,6 +4760,162 @@ class RobotXDashboard(Node):
             view_func=reset_mission_response,
             methods=["POST"]
         )
+
+        # ----------------------------------------------------
+        # Vehicle parameter management
+        #
+        # Phase 1:
+        #   USV -> direct ArduPilot MAVLink
+        #
+        # UAV/UUV will implement the same API contract when
+        # their direct management transports are attached.
+        # ----------------------------------------------------
+
+        def parameter_client(vehicle_id):
+
+            if vehicle_id == "boat":
+                return self.boat_mavlink_client
+
+            if vehicle_id == "uav":
+                return self.uav_mavlink_client
+
+            return None
+
+
+        def vehicle_parameters(vehicle_id):
+
+            client = parameter_client(
+                vehicle_id
+            )
+
+            if client is None:
+
+                return jsonify({
+                    "vehicle_id": vehicle_id,
+                    "available": False,
+                    "write_allowed": False,
+                    "armed": False,
+                    "count": 0,
+                    "expected": None,
+                    "complete": False,
+                    "parameters": [],
+                    "message": (
+                        "Direct parameter backend is "
+                        "not attached to this vehicle yet"
+                    ),
+                })
+
+            result = (
+                client.parameter_snapshot()
+            )
+
+            result["vehicle_id"] = (
+                vehicle_id
+            )
+
+            return jsonify(result)
+
+
+        def refresh_vehicle_parameters(
+            vehicle_id
+        ):
+
+            client = parameter_client(
+                vehicle_id
+            )
+
+            if client is None:
+
+                return jsonify({
+                    "success": False,
+                    "vehicle_id": vehicle_id,
+                    "message": (
+                        "Direct parameter backend is "
+                        "not attached to this vehicle yet"
+                    ),
+                })
+
+            result = (
+                client.refresh_parameters()
+            )
+
+            result["vehicle_id"] = (
+                vehicle_id
+            )
+
+            return jsonify(result)
+
+
+        def set_vehicle_parameter(
+            vehicle_id,
+            param_name,
+        ):
+
+            client = parameter_client(
+                vehicle_id
+            )
+
+            if client is None:
+
+                return jsonify({
+                    "success": False,
+                    "message": (
+                        "Direct parameter backend is "
+                        "not attached to this vehicle yet"
+                    ),
+                })
+
+            data = request.get_json(
+                silent=True
+            ) or {}
+
+            if "value" not in data:
+
+                return jsonify({
+                    "success": False,
+                    "message": (
+                        "Parameter write requires "
+                        "a value"
+                    ),
+                }), 400
+
+            result = (
+                client.set_parameter(
+                    param_name,
+                    data["value"],
+                )
+            )
+
+            return jsonify(result)
+
+
+        app.add_url_rule(
+            "/api/vehicles/<vehicle_id>/parameters",
+            endpoint="vehicle_parameters",
+            view_func=vehicle_parameters,
+            methods=["GET"],
+        )
+
+        app.add_url_rule(
+            (
+                "/api/vehicles/<vehicle_id>/"
+                "parameters/refresh"
+            ),
+            endpoint="refresh_vehicle_parameters",
+            view_func=refresh_vehicle_parameters,
+            methods=["POST"],
+        )
+
+        app.add_url_rule(
+            (
+                "/api/vehicles/<vehicle_id>/"
+                "parameters/<param_name>"
+            ),
+            endpoint="set_vehicle_parameter",
+            view_func=set_vehicle_parameter,
+            methods=["POST"],
+        )
+
 
         # ----------------------------------------------------
         # UAV remote command routes
@@ -4490,6 +5504,28 @@ class RobotXDashboard(Node):
                 logger_rx = data.pop(
                     "logger_last_rx",
                     None
+                )
+
+                servo_output_rx = data.pop(
+                    "servo_output_last_rx",
+                    None
+                )
+
+                data[
+                    "servo_output_age_sec"
+                ] = (
+                    None
+                    if servo_output_rx is None
+                    else now - servo_output_rx
+                )
+
+                data[
+                    "servo_output_fresh"
+                ] = bool(
+                    servo_output_rx is not None
+                    and
+                    now - servo_output_rx
+                    <= 1.0
                 )
 
                 data["battery_fresh"] = bool(
