@@ -11,7 +11,6 @@ from launch_ros.actions import Node
 def generate_launch_description():
     start_mavros = LaunchConfiguration('start_mavros')
     fcu_url = LaunchConfiguration('fcu_url')
-    autonomy_enabled = LaunchConfiguration('autonomy_enabled')
 
     mavros_share = get_package_share_directory('mavros')
     mavros_pluginlist = os.path.join(mavros_share, 'launch', 'apm_pluginlists.yaml')
@@ -36,8 +35,10 @@ def generate_launch_description():
             {
                 'fcu_url': fcu_url,
                 'gcs_url': '',
-                'tgt_system': 1,
-                'tgt_component': 1,
+                'system_id': 255,
+                'component_id': 191,
+                'target_system_id': 1,
+                'target_component_id': 1,
                 'fcu_protocol': 'v2.0',
             },
         ],
@@ -48,17 +49,12 @@ def generate_launch_description():
         executable='mavros_command_bridge',
         name='mavros_command_bridge',
         output='screen',
-        parameters=[bridge_config, {'autonomy_enabled': autonomy_enabled}],
+        parameters=[bridge_config],
     )
 
     return LaunchDescription([
         DeclareLaunchArgument('start_mavros', default_value='true'),
         DeclareLaunchArgument('fcu_url', default_value='udp://0.0.0.0:14550@'),
-        DeclareLaunchArgument(
-            'autonomy_enabled',
-            default_value='false',
-            description='Explicit propulsion-command gate. Keep false for bench testing.',
-        ),
         mavros_node,
         bridge,
     ])

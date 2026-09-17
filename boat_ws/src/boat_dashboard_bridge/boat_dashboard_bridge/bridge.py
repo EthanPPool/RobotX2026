@@ -419,6 +419,7 @@ class BoatDashboardBridge(Node):
 
         with self.lock:
             self.logger_last_rx = time.monotonic()
+
             for source, destination in mapping.items():
                 if source in status:
                     self.telemetry[destination] = status[source]
@@ -684,34 +685,57 @@ class BoatDashboardBridge(Node):
         label="",
         timeout=2.0,
     ):
+        details = {
+            "state": "UNAVAILABLE",
+            "mission_id": 0,
+            "file_path": "",
+        }
+
         if not self.logger_reset_client.wait_for_service(
             timeout_sec=0.50
         ):
             return (
                 False,
                 "Diagnostic logger reset service unavailable",
+                details,
             )
 
         request = ResetMissionLog.Request()
         request.label = str(label or "")
-        future = self.logger_reset_client.call_async(request)
 
-        if not self.wait_future(future, timeout):
+        future = self.logger_reset_client.call_async(
+            request
+        )
+
+        if not self.wait_future(
+            future,
+            timeout,
+        ):
             return (
                 False,
                 "Diagnostic logger reset timed out",
+                details,
             )
 
         response = future.result()
+
         if response is None:
             return (
                 False,
                 "Diagnostic logger returned no response",
+                details,
             )
+
+        details = {
+            "state": str(response.state),
+            "mission_id": int(response.mission_id),
+            "file_path": str(response.file_path),
+        }
 
         return (
             bool(response.success),
             str(response.message),
+            details,
         )
 
     # ========================================================
@@ -1153,8 +1177,12 @@ class BoatDashboardBridge(Node):
                 self.call_reset_service()
             )
 
-            logger_ok, logger_msg = (
-                self.call_logger_reset_service(label)
+            (
+                logger_ok,
+                logger_msg,
+                logger_details,
+            ) = self.call_logger_reset_service(
+                label
             )
 
             if reset_ok:
@@ -1169,6 +1197,7 @@ class BoatDashboardBridge(Node):
                 + reset_msg
                 + " | logger: "
                 + logger_msg,
+                logger_details,
             )
 
     # ========================================================
@@ -1416,6 +1445,7 @@ class BoatDashboardBridge(Node):
         ).strip().lower()
 
         command_data = message.get("data", {})
+
         if not isinstance(command_data, dict):
             command_data = {}
 
@@ -1431,6 +1461,7 @@ class BoatDashboardBridge(Node):
         }
 
         handler = handlers.get(command)
+        response_extra = {}
 
         if handler is None:
             success = False
@@ -1443,7 +1474,22 @@ class BoatDashboardBridge(Node):
             )
 
             try:
-                success, result_message = handler()
+                result = handler()
+
+                if (
+                    isinstance(result, tuple)
+                    and len(result) == 3
+                ):
+                    (
+                        success,
+                        result_message,
+                        response_extra,
+                    ) = result
+                else:
+                    (
+                        success,
+                        result_message,
+                    ) = result
 
             except Exception as exc:
                 self.get_logger().error(
@@ -1462,6 +1508,9 @@ class BoatDashboardBridge(Node):
             "success": bool(success),
             "message": str(result_message),
         }
+
+        if response_extra:
+            response.update(response_extra)
 
         try:
             self.send_to_socket(

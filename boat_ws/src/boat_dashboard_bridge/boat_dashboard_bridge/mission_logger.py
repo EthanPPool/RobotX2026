@@ -87,29 +87,98 @@ SAMPLE_FIELDS = {
     ],
     "mission": [
         "mission_phase", "mission_state_text", "current_gate",
-        "gates_passed", "mission_complete", "follower_enabled",
+        "mission_complete",
     ],
     "follower_diag": [
-        "controller_reason", "passage_armed", "lidar_approach_confirmed",
-        "close_gate_hits", "gate_map_range_m", "gate_signed_distance_m",
-        "gate_lateral_offset_m", "distance_beyond_gate_m",
-        "tracked_port_x", "tracked_port_y", "tracked_starboard_x",
-        "tracked_starboard_y", "tracked_midpoint_x", "tracked_midpoint_y",
-        "saved_port_x", "saved_port_y", "saved_starboard_x",
-        "saved_starboard_y", "saved_midpoint_x", "saved_midpoint_y",
-        "pass_tangent_x", "pass_tangent_y", "pass_normal_x",
-        "pass_normal_y", "pass_target_x", "pass_target_y",
-        "usable_half_width", "target_map_x", "target_map_y",
-        "target_body_x", "target_body_y", "target_distance",
-        "heading_error_deg", "forward_angle_limit_deg", "forward_allowed",
-        "intergate_hold_active", "intergate_resume_requested",
-        "travel_since_pass_arm", "gate_approach_since_pass_arm",
+        "controller_reason",
+        "controller_phase",
+        "controller_current_gate",
+        "gates_passed",
+        "controller_mission_complete",
+        "follower_enabled",
+
+        "local_pose_age_s",
+        "local_pose_fresh",
+        "tracked_gate_measurement_age_s",
+
+        "gate_map_range_m",
+        "gate_signed_distance_m",
+        "gate_lateral_offset_m",
+        "distance_beyond_gate_m",
+
+        "tracked_port_x",
+        "tracked_port_y",
+        "tracked_starboard_x",
+        "tracked_starboard_y",
+        "tracked_midpoint_x",
+        "tracked_midpoint_y",
+
+        "saved_port_x",
+        "saved_port_y",
+        "saved_starboard_x",
+        "saved_starboard_y",
+        "saved_midpoint_x",
+        "saved_midpoint_y",
+
+        "pass_tangent_x",
+        "pass_tangent_y",
+        "pass_normal_x",
+        "pass_normal_y",
+        "saved_gate_width_m",
+        "usable_half_width",
+        "pass_target_x",
+        "pass_target_y",
+
+        "gate_entry_side_m",
+        "previous_pass_signed_distance_m",
+        "previous_pass_lateral_offset_m",
+        "gate_crossed",
+        "crossing_lateral_offset_m",
+
+        "target_map_x",
+        "target_map_y",
+        "target_body_x",
+        "target_body_y",
+        "target_distance",
+
+        "heading_error_deg",
+        "forward_angle_limit_deg",
+        "forward_allowed",
+
+        "diagnostic_follower_linear_x",
+        "diagnostic_follower_angular_z",
     ],
     "follower_cmd": ["follower_linear_x", "follower_angular_z"],
     "bridge_diag": [
-        "bridge_reason", "bridge_autonomy_enabled", "software_estop",
-        "bridge_mode_allowed", "bridge_command_fresh",
-        "bridge_output_authorized", "bridge_input_age_s",
+        "bridge_reason",
+        "bridge_autonomy_enabled",
+        "software_estop",
+        "bridge_mode_allowed",
+        "bridge_command_fresh",
+        "bridge_output_authorized",
+        "bridge_input_age_s",
+
+        "bridge_connected",
+        "bridge_armed",
+        "bridge_mode",
+        "bridge_command_zero",
+
+        "diagnostic_bridge_input_linear_x",
+        "diagnostic_bridge_input_angular_z",
+
+        "hold_required",
+        "last_stop_reason",
+
+        "intergate_hold_active",
+        "intergate_resume_requested",
+
+        "operator_requested",
+        "operator_active",
+        "operator_session_owned",
+        "diagnostic_operator_deadman",
+        "operator_deadman_fresh",
+
+        "battery_safety_status",
     ],
     "bridge_input": ["bridge_input_linear_x", "bridge_input_angular_z"],
     "bridge_output": ["bridge_output_linear_x", "bridge_output_angular_z"],
@@ -134,15 +203,49 @@ for sample_name, names in SAMPLE_FIELDS.items():
 
 
 FOLLOWER_PARAMETERS = [
-    "forward_speed", "yaw_kp", "max_yaw_rate", "forward_angle_limit_deg",
-    "passage_arm_distance", "pass_close_distance",
-    "pass_min_gate_approach", "pass_close_confirm_hits",
-    "pass_loss_timeout", "pass_jump_distance", "pass_min_travel",
-    "gate_timeout", "min_gate_confidence",
+    "enabled",
+    "gates_required",
+    "min_gate_confidence",
+    "gate_timeout",
+    "forward_speed",
+    "yaw_kp",
+    "max_yaw_rate",
+    "forward_angle_limit_deg",
+    "pass_commit_distance",
+    "pass_target_distance",
+    "pass_clear_distance",
+    "local_pose_timeout",
+    "pass_edge_margin",
+    "complete_mode",
+    "complete_mode_retry_period",
 ]
 BRIDGE_PARAMETERS = [
-    "max_forward_speed", "max_yaw_rate", "deadman_timeout",
-    "publish_rate", "allowed_modes",
+    "max_forward_speed",
+    "max_yaw_rate",
+    "deadman_timeout",
+    "initial_command_timeout",
+    "publish_rate",
+    "allowed_modes",
+    "zero_command_epsilon",
+
+    "stop_mode",
+    "hold_retry_period",
+    "shutdown_hold_timeout",
+
+    "operator_mode",
+    "operator_timeout",
+    "operator_manual_axis_max",
+    "operator_mode_retry_period",
+
+    "battery_warning_voltage",
+    "battery_critical_voltage",
+    "battery_critical_duration",
+    "battery_timeout",
+    "battery_required_for_propulsion",
+
+    "autonomy_enabled",
+    "software_estop",
+    "low_voltage_latched",
 ]
 AUTOPILOT_PARAMETERS = [
     "AHRS_ORIENTATION",
@@ -449,31 +552,85 @@ class MissionLogger(Node):
             self.cache(sample_name, data, msg)
 
     def follower_diag_callback(self, msg):
-        self.json_callback("follower_diag", msg)
+        try:
+            data = json.loads(msg.data)
+        except (TypeError, json.JSONDecodeError):
+            return
+
+        if not isinstance(data, dict):
+            return
+
+        renames = {
+            "mission_phase":
+                "controller_phase",
+            "current_gate":
+                "controller_current_gate",
+            "mission_complete":
+                "controller_mission_complete",
+            "follower_linear_x":
+                "diagnostic_follower_linear_x",
+            "follower_angular_z":
+                "diagnostic_follower_angular_z",
+        }
+
+        for source, destination in renames.items():
+            if source in data:
+                data[destination] = data.pop(source)
+
+        self.cache("follower_diag", data, msg)
 
     def bridge_diag_callback(self, msg):
         try:
             data = json.loads(msg.data)
         except (TypeError, json.JSONDecodeError):
             return
+
+        if not isinstance(data, dict):
+            return
+
+        renames = {
+            "bridge_input_linear_x":
+                "diagnostic_bridge_input_linear_x",
+            "bridge_input_angular_z":
+                "diagnostic_bridge_input_angular_z",
+            "operator_deadman":
+                "diagnostic_operator_deadman",
+        }
+
+        for source, destination in renames.items():
+            if source in data:
+                data[destination] = data.pop(source)
+
         reason = data.get("bridge_reason")
+
         if reason != self.last_bridge_reason:
+            previous = self.last_bridge_reason
+
+            self.core.queue_event(
+                "BRIDGE_REASON_CHANGE",
+                f"{previous or 'NONE'} -> {reason}",
+            )
+
             if reason == "SOFTWARE_ESTOP":
                 self.core.queue_event(
                     "SOFTWARE_ESTOP_ON",
                     "bridge output inhibited",
                 )
-            elif self.last_bridge_reason == "SOFTWARE_ESTOP":
+
+            elif previous == "SOFTWARE_ESTOP":
                 self.core.queue_event(
                     "SOFTWARE_ESTOP_OFF",
                     f"new bridge reason={reason}",
                 )
+
             elif reason == "AUTHORIZED":
                 self.core.queue_event(
                     "BRIDGE_AUTHORIZED",
                     "propulsion output authorized",
                 )
+
             self.last_bridge_reason = reason
+
         self.cache("bridge_diag", data, msg)
 
     def twist_callback(self, name, linear_name, angular_name, msg):
@@ -541,13 +698,18 @@ class MissionLogger(Node):
             status = self.core.reset(
                 request.label,
                 metadata={
-                    "logger_version": 1,
+                    "logger_version": 2,
                     "record_rate_hz": self.record_rate_hz,
                     "missing_value_policy": "blank (never synthetic zero)",
                     "coordinate_note": (
-                        "Controller uses live body-frame gate geometry. "
-                        "TRACK map fields are diagnostic transforms; "
-                        "frozen PASS fields are unavailable and remain blank."
+                        "TRACK transforms genuine LiDAR gate observations "
+                        "into the fixed MAVROS map frame and steers toward "
+                        "the remembered map-frame midpoint. At commit, gate "
+                        "posts, midpoint, tangent, normal, usable corridor, "
+                        "and pass target are frozen in map coordinates. "
+                        "PASS ignores current-gate perception and uses local "
+                        "pose, signed gate-plane distance, and lateral offset "
+                        "to verify crossing and clearance."
                     ),
                 },
                 now_monotonic=time.monotonic(),

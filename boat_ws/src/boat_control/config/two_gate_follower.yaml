@@ -11,15 +11,17 @@ two_gate_follower:
     min_gate_confidence: 0.75
     gate_timeout: 0.30
 
-    forward_speed: 0.12
+    forward_speed: 0.02
     yaw_kp: 0.60
     max_yaw_rate: 0.12
     forward_angle_limit_deg: 20.0
 
-    passage_arm_distance: 2.0
-    pass_close_distance: 1.3
-    pass_min_gate_approach: 0.50
-    pass_close_confirm_hits: 3
-    pass_loss_timeout: 0.40
-    pass_jump_distance: 0.40
-    pass_min_travel: 0.75
+    pass_commit_distance: 2.0
+    pass_target_distance: 1.5
+    pass_clear_distance: 1.0
+    local_pose_timeout: 1.50
+    pass_edge_margin: 0.0
+
+    # Final Task 1 behavior
+    complete_mode: "LOITER"
+    complete_mode_retry_period: 0.50

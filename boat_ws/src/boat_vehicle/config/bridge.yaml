@@ -3,11 +3,49 @@ mavros_command_bridge:
     input_topic: "/control/cmd_vel"
     output_topic: "/mavros/setpoint_velocity/cmd_vel"
     state_topic: "/mavros/state"
+    mission_state_topic: "/mission/state"
+
+    operator_input_topic: "/operator/cmd_vel"
+    manual_control_topic: "/mavros/manual_control/send"
+    operator_mode: "MANUAL"
+    operator_timeout: 0.30
+    operator_manual_axis_max: 500.0
+    operator_mode_retry_period: 0.25
+
+    set_mode_service: "/mavros/set_mode"
+    stop_mode: "HOLD"
 
     autonomy_enabled: false
+    software_estop: true
+
     allowed_modes: ["GUIDED"]
-    deadman_timeout: 0.35
+
+    deadman_timeout: 0.25
+    initial_command_timeout: 0.75
     publish_rate: 20.0
 
-    max_forward_speed: 0.60
-    max_yaw_rate: 0.50
+    max_forward_speed: 0.15
+    max_yaw_rate: 0.15
+
+    zero_command_epsilon: 0.0001
+
+    hold_retry_period: 0.50
+    shutdown_hold_timeout: 1.00
+
+    # Battery safety
+    battery_topic: "/mavros/battery"
+
+    # Warning only
+    battery_warning_voltage: 13.6
+
+    # Terminate operation after 1 continuous second
+    # at or below this voltage.
+    battery_critical_voltage: 13.2
+    battery_critical_duration: 1.0
+
+    # Battery telemetry is warning/status only.
+    # It does not veto propulsion authority.
+    battery_timeout: 3.0
+    battery_required_for_propulsion: false
+
+    low_voltage_latched: false

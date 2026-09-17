@@ -1,0 +1,324 @@
+# =============================================================================
+# GLOBAL BUOY TYPE DEFINITIONS - DIAGNOSTIC / CALIBRATION VERSION
+# =============================================================================
+# The detector measures every physical LiDAR cluster with the same feature set
+# and then compares the SMOOTHED TRACK against every enabled buoy model below.
+#
+# RULE SEMANTICS
+# -----------------------------------------------------------------------------
+# hard_min / hard_max
+#   True physical impossibility limits. Crossing one immediately rejects that
+#   buoy model. Keep these deliberately broad during calibration.
+#
+# soft_min / soft_max
+#   Expected range. These affect confidence but DO NOT immediately discard the
+#   physical cluster or its temporal track.
+#
+# ideal
+#   Best expected value. Used when mode: ideal.
+#
+# mode: ideal
+#   Score peaks at ideal and fades toward soft_min / soft_max.
+#
+# mode: range
+#   Any value inside soft_min / soft_max receives full feature credit. Values
+#   outside the soft range fade toward hard_min / hard_max.
+#
+# weight
+#   Importance of that feature in the model confidence.
+#
+# required
+#   Optional. If true, the feature must exist. Leave false for vertical-profile
+#   features because partial LiDAR scans may not populate every height band.
+#
+# IMPORTANT CALIBRATION PRINCIPLE
+# -----------------------------------------------------------------------------
+# Radial depth is deliberately LOW WEIGHT for both real and cardboard models.
+# A cylindrical buoy can appear nearly flat to a LiDAR because the sensor only
+# sees the front arc of the cylinder.
+# =============================================================================
+
+buoy_types:
+
+  # ---------------------------------------------------------------------------
+  # REAL ROBOTX-STYLE CYLINDRICAL BUOY
+  # ---------------------------------------------------------------------------
+  real_cylindrical_buoy:
+    enabled: true
+
+    # Sparse partial scans are allowed into scoring, but confidence improves as
+    # point support approaches good_points.
+    min_points: 4
+    good_points: 18
+    min_score: 0.54
+
+    features:
+
+      # Tangential width across the line of sight.
+      width:
+        hard_min: 0.05
+        hard_max: 0.90
+        soft_min: 0.12
+        soft_max: 0.60
+        ideal: 0.30
+        mode: ideal
+        weight: 2.0
+
+      # Radial thickness is intentionally not a strong classifier.
+      depth:
+        hard_min: 0.00
+        hard_max: 0.80
+        soft_min: 0.00
+        soft_max: 0.65
+        mode: range
+        weight: 0.20
+
+      # Height is expected to be one of our more stable measurements, but the
+      # hard minimum stays low because one rotating scan may see only part of
+      # the buoy.
+      height:
+        hard_min: 0.15
+        hard_max: 1.60
+        soft_min: 0.30
+        soft_max: 1.35
+        ideal: 0.95
+        mode: ideal
+        weight: 2.0
+
+      # PCA verticality is useful but no longer an aggressive hard reject.
+      verticality:
+        hard_min: 0.05
+        hard_max: 1.00
+        soft_min: 0.30
+        soft_max: 1.00
+        ideal: 0.90
+        mode: ideal
+        weight: 1.15
+
+      aspect_ratio:
+        hard_min: 0.20
+        hard_max: 12.0
+        soft_min: 0.70
+        soft_max: 8.0
+        ideal: 3.0
+        mode: ideal
+        weight: 0.70
+
+      # Optional vertical-profile evidence. The real buoy may have a wider
+      # lower region than upper region. Missing data do not reject the model.
+      lower_upper_ratio:
+        hard_min: 0.20
+        hard_max: 5.00
+        soft_min: 0.70
+        soft_max: 2.80
+        ideal: 1.45
+        mode: ideal
+        weight: 0.70
+        required: false
+
+      vertical_width_variation:
+        hard_min: 0.00
+        hard_max: 2.00
+        soft_min: 0.00
+        soft_max: 0.80
+        mode: range
+        weight: 0.30
+        required: false
+
+  # ---------------------------------------------------------------------------
+  # FLAT CARDBOARD BUOY SURROGATE
+  # ---------------------------------------------------------------------------
+  cardboard_cutout:
+    enabled: true
+    min_points: 3
+    good_points: 12
+    min_score: 0.54
+
+    features:
+
+      # The visible silhouette should still have approximately buoy-like width.
+      width:
+        hard_min: 0.05
+        hard_max: 0.90
+        soft_min: 0.10
+        soft_max: 0.65
+        ideal: 0.30
+        mode: ideal
+        weight: 2.0
+
+      # Small depth is permitted, but receives little weight because a real
+      # cylinder can also appear shallow from the front.
+      depth:
+        hard_min: 0.00
+        hard_max: 0.60
+        soft_min: 0.00
+        soft_max: 0.22
+        mode: range
+        weight: 0.25
+
+      height:
+        hard_min: 0.15
+        hard_max: 1.60
+        soft_min: 0.30
+        soft_max: 1.35
+        ideal: 0.95
+        mode: ideal
+        weight: 2.0
+
+      verticality:
+        hard_min: 0.05
+        hard_max: 1.00
+        soft_min: 0.25
+        soft_max: 1.00
+        ideal: 0.90
+        mode: ideal
+        weight: 1.10
+
+      # A flat marker may produce stronger planar PCA structure.
+      planarity:
+        hard_min: 0.00
+        hard_max: 1.00
+        soft_min: 0.05
+        soft_max: 1.00
+        ideal: 0.70
+        mode: ideal
+        weight: 0.65
+
+      aspect_ratio:
+        hard_min: 0.20
+        hard_max: 12.0
+        soft_min: 0.70
+        soft_max: 9.0
+        ideal: 3.0
+        mode: ideal
+        weight: 0.65
+
+      # A cutout is expected to keep a relatively constant silhouette width
+      # from bottom to top, but this remains weak evidence until measured.
+      lower_upper_ratio:
+        hard_min: 0.20
+        hard_max: 5.00
+        soft_min: 0.60
+        soft_max: 1.60
+        ideal: 1.00
+        mode: ideal
+        weight: 0.35
+        required: false
+
+      vertical_width_variation:
+        hard_min: 0.00
+        hard_max: 2.00
+        soft_min: 0.00
+        soft_max: 0.40
+        ideal: 0.10
+        mode: ideal
+        weight: 0.35
+        required: false
+
+  # ---------------------------------------------------------------------------
+  # OPTIONAL GENERIC UPRIGHT MARKER
+  # ---------------------------------------------------------------------------
+  # Leave disabled during calibration. It can later become a low-confidence
+  # fallback for task markers that do not cleanly match a known subtype.
+  generic_upright_marker:
+    enabled: false
+    min_points: 4
+    good_points: 14
+    min_score: 0.66
+
+    features:
+      width:
+        hard_min: 0.04
+        hard_max: 1.00
+        soft_min: 0.08
+        soft_max: 0.80
+        ideal: 0.30
+        mode: ideal
+        weight: 1.5
+
+      height:
+        hard_min: 0.15
+        hard_max: 1.80
+        soft_min: 0.30
+        soft_max: 1.60
+        ideal: 0.95
+        mode: ideal
+        weight: 2.0
+
+      verticality:
+        hard_min: 0.05
+        hard_max: 1.00
+        soft_min: 0.25
+        soft_max: 1.00
+        ideal: 0.90
+        mode: ideal
+        weight: 1.5
+
+# =============================================================================
+# GENERIC BUOY MODEL
+# =============================================================================
+# This model answers only:
+#
+#     "Does this persistent physical object look enough like a buoy?"
+#
+# It intentionally does NOT distinguish real cylinders from cardboard.
+# The subtype definitions below perform that second classification step.
+# =============================================================================
+
+generic_buoy:
+  min_points: 4
+  good_points: 18
+  min_score: 0.52
+
+  features:
+
+    # Tangential width measured across the LiDAR line of sight.
+    width:
+      hard_min: 0.05
+      hard_max: 0.90
+      soft_min: 0.12
+      soft_max: 0.65
+      ideal: 0.40
+      mode: ideal
+      weight: 2.0
+
+    # Radial depth is deliberately weak evidence because a cylindrical buoy
+    # may look shallow when only its front surface is visible.
+    depth:
+      hard_min: 0.00
+      hard_max: 0.85
+      soft_min: 0.00
+      soft_max: 0.70
+      mode: range
+      weight: 0.20
+
+    # Height is one of the strongest measurements observed in our real-buoy
+    # testing.
+    height:
+      hard_min: 0.20
+      hard_max: 1.65
+      soft_min: 0.35
+      soft_max: 1.45
+      ideal: 1.00
+      mode: ideal
+      weight: 2.3
+
+    # The target should generally be an upright object.
+    verticality:
+      hard_min: 0.05
+      hard_max: 1.00
+      soft_min: 0.25
+      soft_max: 1.00
+      ideal: 0.85
+      mode: ideal
+      weight: 1.4
+
+    # Broad height-to-width relationship.
+    aspect_ratio:
+      hard_min: 0.20
+      hard_max: 12.0
+      soft_min: 0.70
+      soft_max: 8.0
+      ideal: 2.5
+      mode: ideal
+      weight: 0.65
