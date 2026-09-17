@@ -36,8 +36,12 @@ class RoboCommandClient:
         host=None,
         port=None,
         team_id=None,
+        uav_geofence_snapshot=None,
     ):
         self.vehicle_snapshot = vehicle_snapshot
+        self.uav_geofence_snapshot = (
+            uav_geofence_snapshot
+        )
 
         self.host = (
             host
@@ -774,23 +778,107 @@ class RoboCommandClient:
                 ),
             }
 
-        if (
-            corners[0]["latitude"]
-            != corners[-1]["latitude"]
-            or
-            corners[0]["longitude"]
-            != corners[-1]["longitude"]
+
+        if self.uav_geofence_snapshot is None:
+            return {
+                "success": False,
+                "message": (
+                    "Native UAV geofence source "
+                    "is unavailable."
+                ),
+            }
+
+
+        fence = (
+            self.uav_geofence_snapshot()
+        )
+
+
+        if not fence.get(
+            "complete",
+            False,
         ):
-            corners.append(
-                dict(corners[0])
+            return {
+                "success": False,
+                "message": (
+                    "Native UAV geofence has not "
+                    "been downloaded completely."
+                ),
+            }
+
+
+        zones = list(
+            fence.get(
+                "zones",
+                []
             )
+        )
+
+
+        inclusion_polygons = [
+            zone
+            for zone in zones
+            if zone.get("type")
+            == "inclusion_polygon"
+        ]
+
+
+        if inclusion_polygons:
+
+            vertices = list(
+                inclusion_polygons[
+                    0
+                ].get(
+                    "points",
+                    []
+                )
+            )
+
+        else:
+
+            # Compatibility fallback for an older
+            # cached fence representation.
+            vertices = list(
+                fence.get(
+                    "inclusion_vertices",
+                    []
+                )
+            )
+
+
+        if len(vertices) < 3:
+            return {
+                "success": False,
+                "message": (
+                    "Native UAV geofence does not "
+                    "contain a valid inclusion polygon."
+                ),
+            }
+
+
+        # RobotX RunDeclaration uses a closed polygon.
+        if (
+            vertices[0]["latitude"]
+            != vertices[-1]["latitude"]
+            or
+            vertices[0]["longitude"]
+            != vertices[-1]["longitude"]
+        ):
+            vertices.append(
+                dict(vertices[0])
+            )
+
 
         geofence = [
             common_pb2.LatLng(
-                latitude=p["latitude"],
-                longitude=p["longitude"],
+                latitude=float(
+                    p["latitude"]
+                ),
+                longitude=float(
+                    p["longitude"]
+                ),
             )
-            for p in corners
+            for p in vertices
         ]
 
         with self.lock:

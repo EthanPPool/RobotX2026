@@ -120,12 +120,86 @@ HTML = r"""
             display: block;
         }
 
+        #map-page {
+            position: relative;
+        }
+
         #map {
             width: 100%;
             height: calc(100vh - 155px);
             min-height: 500px;
             border: 1px solid #344250;
             border-radius: 8px;
+        }
+
+        /* ==================================================
+           OVERVIEW MAP GEOFENCE CONTROL
+           ================================================== */
+
+        .map-geofence-card {
+            position: absolute;
+            z-index: 1100;
+            top: 36px;
+            right: 36px;
+            width: 320px;
+            max-height: calc(100vh - 210px);
+            overflow-y: auto;
+
+            background: rgba(24, 34, 45, 0.96);
+            border: 1px solid #52677a;
+            border-radius: 8px;
+            padding: 14px;
+
+            box-shadow:
+                0 4px 18px rgba(0, 0, 0, 0.45);
+        }
+
+        .map-geofence-card h2 {
+            margin: 0 0 10px 0;
+            font-size: 17px;
+        }
+
+        .map-geofence-buttons {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .map-geofence-message {
+            margin-top: 10px;
+            padding: 8px;
+            min-height: 34px;
+
+            background: #10171e;
+            border: 1px solid #344250;
+            border-radius: 5px;
+
+            font-family: monospace;
+            font-size: 12px;
+            overflow-wrap: anywhere;
+        }
+
+        .map-geofence-drawing {
+            color: #ffd84d;
+            font-weight: bold;
+        }
+
+        .map-geofence-enabled {
+            color: #61d095;
+            font-weight: bold;
+        }
+
+        .map-geofence-disabled {
+            color: #ee6c6c;
+            font-weight: bold;
+        }
+
+        @media (max-width: 700px) {
+            .map-geofence-card {
+                width: calc(100% - 70px);
+                right: 35px;
+            }
         }
 
         .vehicle-layout {
@@ -625,6 +699,50 @@ HTML = r"""
             font-family: monospace;
         }
 
+
+        /* ==================================================
+           UAV GEOFENCE
+           ================================================== */
+
+        .geofence-map {
+            width: 100%;
+            height: 430px;
+            margin-top: 14px;
+            border: 1px solid #344250;
+            border-radius: 6px;
+        }
+
+        .geofence-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 14px;
+            font-family: monospace;
+            font-size: 13px;
+        }
+
+        .geofence-table th,
+        .geofence-table td {
+            padding: 9px 10px;
+            border-bottom: 1px solid #283744;
+            text-align: left;
+        }
+
+        .geofence-status {
+            margin-bottom: 12px;
+            padding: 10px;
+            border: 1px solid #344250;
+            border-radius: 5px;
+            background: #10171e;
+            font-family: monospace;
+        }
+
+
+        /* LEGACY UAV GEOFENCE TAB HIDDEN */
+        #uav-geofence-tab,
+        #uav-geofence-panel {
+            display: none !important;
+        }
+
 </style>
 </head>
 
@@ -653,6 +771,297 @@ HTML = r"""
      class="page active">
 
     <div id="map"></div>
+
+
+    <div
+        class="map-geofence-card"
+        id="overview-geofence-card">
+
+        <h2>UAV Geofence</h2>
+
+
+        <div class="row">
+            <span>Autopilot</span>
+            <span
+                class="value"
+                id="full-fence-status">
+                NOT LOADED
+            </span>
+        </div>
+
+        <div class="row">
+            <span>Zones</span>
+            <span
+                class="value"
+                id="full-fence-zone-count">
+                0
+            </span>
+        </div>
+
+        <div class="row">
+            <span>Hard Fence</span>
+            <span
+                class="value"
+                id="full-fence-enabled">
+                --
+            </span>
+        </div>
+
+
+        <button
+            class="control-button"
+            onclick="fullFenceLoadFromAutopilot()">
+            LOAD FROM PIXHAWK
+        </button>
+
+
+        <hr style="
+            border:0;
+            border-top:1px solid #344250;
+            margin:14px 0;
+        ">
+
+
+        <div style="font-weight:bold;">
+            Add Zone
+        </div>
+
+        <select
+            id="full-fence-new-type"
+            style="
+                width:100%;
+                margin-top:8px;
+                padding:8px;
+                background:#10171e;
+                color:#e8edf2;
+                border:1px solid #46596b;
+                border-radius:5px;
+            ">
+
+            <option value="inclusion_polygon">
+                Inclusion Polygon
+            </option>
+
+            <option value="exclusion_polygon">
+                Exclusion Polygon
+            </option>
+
+            <option value="inclusion_circle">
+                Inclusion Circle
+            </option>
+
+            <option value="exclusion_circle">
+                Exclusion Circle
+            </option>
+
+        </select>
+
+
+        <button
+            class="control-button enable-button"
+            onclick="fullFenceAddZone()">
+            ADD ZONE
+        </button>
+
+
+        <div
+            id="full-fence-zones"
+            style="
+                margin-top:12px;
+                max-height:190px;
+                overflow:auto;
+            ">
+            No zones loaded.
+        </div>
+
+
+        <div
+            id="full-fence-active-controls"
+            style="margin-top:10px;">
+
+            <button
+                class="control-button"
+                onclick="fullFenceFinishDrawing()">
+                FINISH DRAWING
+            </button>
+
+            <button
+                class="control-button"
+                onclick="fullFenceUndo()">
+                UNDO VERTEX
+            </button>
+
+            <button
+                class="control-button disarm-button"
+                onclick="fullFenceDeleteActive()">
+                DELETE SELECTED ZONE
+            </button>
+
+        </div>
+
+
+        <button
+            class="control-button enable-button"
+            onclick="fullFenceUploadAll()">
+            UPLOAD ALL & VERIFY
+        </button>
+
+
+        <hr style="
+            border:0;
+            border-top:1px solid #344250;
+            margin:14px 0;
+        ">
+
+
+        <details>
+            <summary
+                style="
+                    cursor:pointer;
+                    font-weight:bold;
+                    padding:6px 0;
+                ">
+                Fence Settings
+            </summary>
+
+
+            <div style="margin-top:10px;">
+
+                <label>
+                    Breach Action
+                </label>
+
+                <select
+                    id="full-fence-action"
+                    style="
+                        width:100%;
+                        padding:7px;
+                        margin:4px 0 10px;
+                        background:#10171e;
+                        color:#e8edf2;
+                    ">
+                    <option value="0">Report Only</option>
+                    <option value="1">RTL / Land</option>
+                    <option value="2">Land</option>
+                    <option value="3">SmartRTL / RTL / Land</option>
+                    <option value="4">Brake / Land</option>
+                    <option value="5">SmartRTL / Land</option>
+                </select>
+
+
+                <label>Maximum Altitude (m)</label>
+                <input
+                    id="full-fence-alt-max"
+                    type="number"
+                    step="1"
+                    class="parameter-search"
+                    style="width:100%;margin:4px 0 10px;">
+
+
+                <label>Minimum Altitude (m)</label>
+                <input
+                    id="full-fence-alt-min"
+                    type="number"
+                    step="1"
+                    class="parameter-search"
+                    style="width:100%;margin:4px 0 10px;">
+
+
+                <label>Fence Margin (m)</label>
+                <input
+                    id="full-fence-margin"
+                    type="number"
+                    step="0.5"
+                    class="parameter-search"
+                    style="width:100%;margin:4px 0 10px;">
+
+
+                <label>Home Circle Radius (m)</label>
+                <input
+                    id="full-fence-radius"
+                    type="number"
+                    step="1"
+                    class="parameter-search"
+                    style="width:100%;margin:4px 0 10px;">
+
+
+                <div style="margin-top:8px;font-weight:bold;">
+                    Enabled Fence Types
+                </div>
+
+                <label style="display:block;margin-top:6px;">
+                    <input
+                        id="full-type-max"
+                        type="checkbox">
+                    Maximum Altitude
+                </label>
+
+                <label style="display:block;margin-top:6px;">
+                    <input
+                        id="full-type-circle"
+                        type="checkbox">
+                    Home-Centered Circle
+                </label>
+
+                <label style="display:block;margin-top:6px;">
+                    <input
+                        id="full-type-zones"
+                        type="checkbox">
+                    Inclusion / Exclusion Zones
+                </label>
+
+                <label style="display:block;margin-top:6px;">
+                    <input
+                        id="full-type-min"
+                        type="checkbox">
+                    Minimum Altitude
+                </label>
+
+
+                <label
+                    style="
+                        display:block;
+                        margin-top:12px;
+                    ">
+                    <input
+                        id="full-fence-union"
+                        type="checkbox">
+                    Use UNION of inclusion areas
+                </label>
+
+
+                <button
+                    class="control-button"
+                    onclick="fullFenceApplySettings()">
+                    APPLY SETTINGS
+                </button>
+
+            </div>
+
+        </details>
+
+
+        <button
+            class="control-button enable-button"
+            onclick="fullFenceSetEnabled(true)">
+            ENABLE HARD FENCE
+        </button>
+
+        <button
+            class="control-button disarm-button"
+            onclick="fullFenceSetEnabled(false)">
+            DISABLE HARD FENCE
+        </button>
+
+
+        <div
+            class="map-geofence-message"
+            id="full-fence-message">
+            Loading native fence...
+        </div>
+
+    </div>
+
 
     <div id="summary">
         Waiting for telemetry...
@@ -877,8 +1286,1804 @@ L.tileLayer(
 const markers = {};
 const vehiclePages = {};
 const vehicleParameterState = {};
+const vehicleGeofenceState = {};
+const vehicleGeofenceMaps = {};
+const vehicleGeofenceLayers = {};
 
 let mapCentered = false;
+
+
+/* ==========================================================
+   OVERVIEW MAP GEOFENCE STATE
+   ========================================================== */
+
+let overviewFenceState = null;
+
+let overviewFenceEditor = [];
+
+let overviewFencePolygon = null;
+
+let overviewFenceMarkers = [];
+
+let overviewFenceDrawing = false;
+
+
+
+/* ==========================================================
+   FULL OVERVIEW MAP UAV GEOFENCE EDITOR
+   ========================================================== */
+
+let fullFenceState = null;
+let fullFenceZones = [];
+let fullFenceActive = -1;
+let fullFenceDrawing = false;
+
+let fullFenceLayers = [];
+let fullFenceEditMarkers = [];
+
+
+function fullFenceMessage(text) {
+
+    setText(
+        "full-fence-message",
+        String(text)
+    );
+}
+
+
+function fullFenceClearMap() {
+
+    fullFenceLayers.forEach(
+        layer => {
+            map.removeLayer(layer);
+        }
+    );
+
+    fullFenceEditMarkers.forEach(
+        layer => {
+            map.removeLayer(layer);
+        }
+    );
+
+    fullFenceLayers = [];
+    fullFenceEditMarkers = [];
+}
+
+
+function fullFenceTypeLabel(type) {
+
+    const labels = {
+        inclusion_polygon:
+            "Inclusion Polygon",
+
+        exclusion_polygon:
+            "Exclusion Polygon",
+
+        inclusion_circle:
+            "Inclusion Circle",
+
+        exclusion_circle:
+            "Exclusion Circle"
+    };
+
+    return labels[type] ?? type;
+}
+
+
+function fullFenceRender() {
+
+    fullFenceClearMap();
+
+
+    fullFenceZones.forEach(
+        (zone, zoneIndex) => {
+
+            const active =
+                zoneIndex === fullFenceActive;
+
+
+            if (
+                zone.type === "inclusion_polygon"
+                ||
+                zone.type === "exclusion_polygon"
+            ) {
+
+                const points =
+                    Array.isArray(
+                        zone.points
+                    )
+                        ? zone.points
+                        : [];
+
+
+                const latLngs =
+                    points.map(
+                        point => [
+                            Number(
+                                point.latitude
+                            ),
+                            Number(
+                                point.longitude
+                            )
+                        ]
+                    );
+
+
+                if (latLngs.length >= 3) {
+
+                    const polygon =
+                        L.polygon(
+                            latLngs,
+                            {
+                                weight:
+                                    active ? 5 : 3,
+
+                                fillOpacity:
+                                    zone.type
+                                    === "inclusion_polygon"
+                                        ? 0.13
+                                        : 0.05,
+
+                                dashArray:
+                                    zone.type
+                                    === "exclusion_polygon"
+                                        ? "8 6"
+                                        : null
+                            }
+                        )
+                        .addTo(map);
+
+                    polygon.on(
+                        "click",
+                        event => {
+                            L.DomEvent
+                                .stopPropagation(
+                                    event
+                                );
+
+                            fullFenceSelect(
+                                zoneIndex
+                            );
+                        }
+                    );
+
+                    fullFenceLayers.push(
+                        polygon
+                    );
+
+
+                } else if (
+                    latLngs.length >= 2
+                ) {
+
+                    const line =
+                        L.polyline(
+                            latLngs,
+                            {
+                                weight: 4
+                            }
+                        )
+                        .addTo(map);
+
+                    fullFenceLayers.push(
+                        line
+                    );
+                }
+
+
+                if (active) {
+
+                    points.forEach(
+                        (point, pointIndex) => {
+
+                            const marker =
+                                L.marker(
+                                    [
+                                        Number(
+                                            point.latitude
+                                        ),
+                                        Number(
+                                            point.longitude
+                                        )
+                                    ],
+                                    {
+                                        draggable: true
+                                    }
+                                )
+                                .addTo(map);
+
+
+                            marker.bindTooltip(
+                                `Vertex ${pointIndex + 1}`
+                            );
+
+
+                            marker.on(
+                                "dragend",
+                                event => {
+
+                                    const pos =
+                                        event.target
+                                        .getLatLng();
+
+                                    zone.points[
+                                        pointIndex
+                                    ] = {
+                                        latitude:
+                                            pos.lat,
+
+                                        longitude:
+                                            pos.lng
+                                    };
+
+                                    fullFenceRender();
+                                }
+                            );
+
+
+                            marker.on(
+                                "contextmenu",
+                                event => {
+
+                                    if (
+                                        event.originalEvent
+                                    ) {
+                                        event.originalEvent
+                                        .preventDefault();
+                                    }
+
+                                    zone.points.splice(
+                                        pointIndex,
+                                        1
+                                    );
+
+                                    fullFenceRender();
+                                }
+                            );
+
+
+                            fullFenceEditMarkers.push(
+                                marker
+                            );
+                        }
+                    );
+                }
+            }
+
+
+            if (
+                zone.type === "inclusion_circle"
+                ||
+                zone.type === "exclusion_circle"
+            ) {
+
+                if (!zone.center) {
+                    return;
+                }
+
+
+                const radius =
+                    Number(
+                        zone.radius_m
+                        ?? 20
+                    );
+
+
+                const circle =
+                    L.circle(
+                        [
+                            Number(
+                                zone.center.latitude
+                            ),
+                            Number(
+                                zone.center.longitude
+                            )
+                        ],
+                        {
+                            radius: radius,
+                            weight:
+                                active ? 5 : 3,
+
+                            fillOpacity:
+                                zone.type
+                                === "inclusion_circle"
+                                    ? 0.13
+                                    : 0.05,
+
+                            dashArray:
+                                zone.type
+                                === "exclusion_circle"
+                                    ? "8 6"
+                                    : null
+                        }
+                    )
+                    .addTo(map);
+
+
+                circle.on(
+                    "click",
+                    event => {
+
+                        L.DomEvent
+                            .stopPropagation(
+                                event
+                            );
+
+                        fullFenceSelect(
+                            zoneIndex
+                        );
+                    }
+                );
+
+
+                fullFenceLayers.push(
+                    circle
+                );
+
+
+                if (active) {
+
+                    const marker =
+                        L.marker(
+                            [
+                                Number(
+                                    zone.center.latitude
+                                ),
+                                Number(
+                                    zone.center.longitude
+                                )
+                            ],
+                            {
+                                draggable: true
+                            }
+                        )
+                        .addTo(map);
+
+
+                    marker.bindTooltip(
+                        "Circle center"
+                    );
+
+
+                    marker.on(
+                        "dragend",
+                        event => {
+
+                            const pos =
+                                event.target
+                                .getLatLng();
+
+                            zone.center = {
+                                latitude:
+                                    pos.lat,
+
+                                longitude:
+                                    pos.lng
+                            };
+
+                            fullFenceRender();
+                        }
+                    );
+
+
+                    fullFenceEditMarkers.push(
+                        marker
+                    );
+                }
+            }
+        }
+    );
+
+
+    fullFenceRenderList();
+
+
+    setText(
+        "full-fence-zone-count",
+        String(
+            fullFenceZones.length
+        )
+    );
+}
+
+
+function fullFenceRenderList() {
+
+    const container =
+        document.getElementById(
+            "full-fence-zones"
+        );
+
+
+    if (!container) {
+        return;
+    }
+
+
+    if (
+        fullFenceZones.length === 0
+    ) {
+
+        container.innerHTML =
+            "<div class='value'>"
+            + "No fence zones."
+            + "</div>";
+
+        return;
+    }
+
+
+    container.innerHTML =
+        fullFenceZones
+        .map(
+            (zone, index) => {
+
+                const selected =
+                    index === fullFenceActive;
+
+
+                let detail = "";
+
+
+                if (
+                    zone.type.endsWith(
+                        "_polygon"
+                    )
+                ) {
+
+                    detail =
+                        `${
+                            zone.points
+                            ?.length ?? 0
+                        } vertices`;
+
+                } else {
+
+                    detail =
+                        `${Number(
+                            zone.radius_m
+                            ?? 0
+                        ).toFixed(1)} m radius`;
+                }
+
+
+                const radiusEditor =
+                    (
+                        selected
+                        &&
+                        zone.type.endsWith(
+                            "_circle"
+                        )
+                    )
+                    ? `
+                        <div
+                            style="
+                                margin-top:7px;
+                                display:flex;
+                                gap:6px;
+                                align-items:center;
+                            ">
+
+                            <span>
+                                Radius:
+                            </span>
+
+                            <input
+                                type="number"
+                                min="1"
+                                step="1"
+                                value="${
+                                    Number(
+                                        zone.radius_m
+                                        ?? 20
+                                    )
+                                }"
+                                style="
+                                    width:90px;
+                                    background:#10171e;
+                                    color:white;
+                                    border:1px solid #46596b;
+                                    padding:5px;
+                                "
+                                onchange="
+                                    fullFenceSetRadius(
+                                        ${index},
+                                        this.value
+                                    )
+                                ">
+
+                            <span>m</span>
+
+                        </div>
+                    `
+                    : "";
+
+
+                return `
+                    <div
+                        style="
+                            border:
+                                1px solid ${
+                                    selected
+                                        ? "#b5c7d8"
+                                        : "#344250"
+                                };
+                            border-radius:5px;
+                            padding:8px;
+                            margin-bottom:7px;
+                            cursor:pointer;
+                        "
+                        onclick="
+                            fullFenceSelect(
+                                ${index}
+                            )
+                        ">
+
+                        <div
+                            style="
+                                font-weight:bold;
+                            ">
+                            ${index + 1}.
+                            ${
+                                fullFenceTypeLabel(
+                                    zone.type
+                                )
+                            }
+                        </div>
+
+                        <div
+                            class="value"
+                            style="
+                                margin-top:4px;
+                            ">
+                            ${detail}
+                        </div>
+
+                        ${radiusEditor}
+
+                        ${
+                            selected
+                            ? `
+                                <div
+                                    style="
+                                        display:flex;
+                                        gap:5px;
+                                        margin-top:7px;
+                                    ">
+
+                                    <button
+                                        onclick="
+                                            event.stopPropagation();
+                                            fullFenceMove(
+                                                ${index},
+                                                -1
+                                            );
+                                        ">
+                                        ↑
+                                    </button>
+
+                                    <button
+                                        onclick="
+                                            event.stopPropagation();
+                                            fullFenceMove(
+                                                ${index},
+                                                1
+                                            );
+                                        ">
+                                        ↓
+                                    </button>
+
+                                </div>
+                            `
+                            : ""
+                        }
+
+                    </div>
+                `;
+            }
+        )
+        .join("");
+}
+
+
+function fullFenceSelect(index) {
+
+    if (
+        index < 0
+        ||
+        index >= fullFenceZones.length
+    ) {
+        return;
+    }
+
+    fullFenceActive = index;
+
+    fullFenceDrawing = false;
+
+    fullFenceRender();
+
+
+    const zone =
+        fullFenceZones[index];
+
+
+    fullFenceMessage(
+        "Selected "
+        + fullFenceTypeLabel(
+            zone.type
+        )
+        + ". Drag its map handles "
+        + "to edit it."
+    );
+}
+
+
+function fullFenceAddZone() {
+
+    const select =
+        document.getElementById(
+            "full-fence-new-type"
+        );
+
+    const type =
+        select?.value
+        ?? "inclusion_polygon";
+
+
+    let zone;
+
+
+    if (
+        type.endsWith(
+            "_polygon"
+        )
+    ) {
+
+        zone = {
+            type: type,
+            points: []
+        };
+
+    } else {
+
+        zone = {
+            type: type,
+            center: null,
+            radius_m: 20.0
+        };
+    }
+
+
+    fullFenceZones.push(
+        zone
+    );
+
+    fullFenceActive =
+        fullFenceZones.length - 1;
+
+    fullFenceDrawing = true;
+
+
+    fullFenceRender();
+
+
+    if (
+        type.endsWith(
+            "_polygon"
+        )
+    ) {
+
+        fullFenceMessage(
+            "DRAWING "
+            + fullFenceTypeLabel(type)
+            + ": click the map for each vertex."
+        );
+
+    } else {
+
+        fullFenceMessage(
+            "Click the map once "
+            + "to place the circle center."
+        );
+    }
+}
+
+
+function fullFenceFinishDrawing() {
+
+    fullFenceDrawing = false;
+
+    fullFenceRender();
+
+
+    if (
+        fullFenceActive >= 0
+    ) {
+
+        fullFenceMessage(
+            "Zone editing finished. "
+            + "UPLOAD ALL & VERIFY when ready."
+        );
+    }
+}
+
+
+function fullFenceUndo() {
+
+    if (
+        fullFenceActive < 0
+        ||
+        fullFenceActive
+        >= fullFenceZones.length
+    ) {
+        return;
+    }
+
+
+    const zone =
+        fullFenceZones[
+            fullFenceActive
+        ];
+
+
+    if (
+        zone.type.endsWith(
+            "_polygon"
+        )
+        &&
+        zone.points?.length
+    ) {
+
+        zone.points.pop();
+
+        fullFenceRender();
+    }
+}
+
+
+function fullFenceDeleteActive() {
+
+    if (
+        fullFenceActive < 0
+        ||
+        fullFenceActive
+        >= fullFenceZones.length
+    ) {
+        return;
+    }
+
+
+    const zone =
+        fullFenceZones[
+            fullFenceActive
+        ];
+
+
+    if (
+        !confirm(
+            "Delete "
+            + fullFenceTypeLabel(
+                zone.type
+            )
+            + " from the local editor?\\n\\n"
+            + "The Pixhawk is not modified "
+            + "until UPLOAD ALL & VERIFY."
+        )
+    ) {
+        return;
+    }
+
+
+    fullFenceZones.splice(
+        fullFenceActive,
+        1
+    );
+
+
+    if (
+        fullFenceZones.length === 0
+    ) {
+
+        fullFenceActive = -1;
+
+    } else {
+
+        fullFenceActive =
+            Math.min(
+                fullFenceActive,
+                fullFenceZones.length - 1
+            );
+    }
+
+
+    fullFenceDrawing = false;
+
+    fullFenceRender();
+}
+
+
+function fullFenceMove(
+    index,
+    delta
+) {
+
+    const target =
+        index + delta;
+
+
+    if (
+        target < 0
+        ||
+        target >= fullFenceZones.length
+    ) {
+        return;
+    }
+
+
+    const temp =
+        fullFenceZones[index];
+
+    fullFenceZones[index] =
+        fullFenceZones[target];
+
+    fullFenceZones[target] =
+        temp;
+
+
+    fullFenceActive =
+        target;
+
+
+    fullFenceRender();
+}
+
+
+function fullFenceSetRadius(
+    index,
+    value
+) {
+
+    const radius =
+        Number(value);
+
+
+    if (
+        !Number.isFinite(radius)
+        ||
+        radius <= 0
+    ) {
+        return;
+    }
+
+
+    if (
+        index < 0
+        ||
+        index >= fullFenceZones.length
+    ) {
+        return;
+    }
+
+
+    fullFenceZones[index]
+        .radius_m = radius;
+
+
+    fullFenceRender();
+}
+
+
+function fullFenceFitBounds() {
+
+    const positions = [];
+
+
+    fullFenceZones.forEach(
+        zone => {
+
+            if (
+                zone.type.endsWith(
+                    "_polygon"
+                )
+            ) {
+
+                (
+                    zone.points
+                    ?? []
+                )
+                .forEach(
+                    point => {
+                        positions.push([
+                            Number(
+                                point.latitude
+                            ),
+                            Number(
+                                point.longitude
+                            )
+                        ]);
+                    }
+                );
+
+            } else if (
+                zone.center
+            ) {
+
+                positions.push([
+                    Number(
+                        zone.center.latitude
+                    ),
+                    Number(
+                        zone.center.longitude
+                    )
+                ]);
+            }
+        }
+    );
+
+
+    if (
+        positions.length > 0
+    ) {
+
+        const bounds =
+            L.latLngBounds(
+                positions
+            );
+
+
+        if (bounds.isValid()) {
+
+            map.fitBounds(
+                bounds,
+                {
+                    padding:
+                        [50, 380],
+                    maxZoom: 19
+                }
+            );
+        }
+    }
+}
+
+
+function fullFencePopulateSettings(
+    settings
+) {
+
+    settings =
+        settings ?? {};
+
+
+    const setValue = (
+        id,
+        value
+    ) => {
+
+        const element =
+            document.getElementById(id);
+
+        if (
+            element
+            &&
+            value !== null
+            &&
+            value !== undefined
+        ) {
+            element.value =
+                String(value);
+        }
+    };
+
+
+    setValue(
+        "full-fence-action",
+        settings.FENCE_ACTION
+    );
+
+    setValue(
+        "full-fence-alt-max",
+        settings.FENCE_ALT_MAX
+    );
+
+    setValue(
+        "full-fence-alt-min",
+        settings.FENCE_ALT_MIN
+    );
+
+    setValue(
+        "full-fence-margin",
+        settings.FENCE_MARGIN
+    );
+
+    setValue(
+        "full-fence-radius",
+        settings.FENCE_RADIUS
+    );
+
+
+    const fenceType =
+        Number(
+            settings.FENCE_TYPE
+            ?? 0
+        );
+
+
+    const typeBits = [
+        ["full-type-max", 1],
+        ["full-type-circle", 2],
+        ["full-type-zones", 4],
+        ["full-type-min", 8],
+    ];
+
+
+    typeBits.forEach(
+        ([id, bit]) => {
+
+            const element =
+                document.getElementById(id);
+
+            if (element) {
+
+                element.checked =
+                    (
+                        fenceType & bit
+                    ) !== 0;
+            }
+        }
+    );
+
+
+    const options =
+        Number(
+            settings.FENCE_OPTIONS
+            ?? 0
+        );
+
+
+    const union =
+        document.getElementById(
+            "full-fence-union"
+        );
+
+
+    if (union) {
+
+        // FENCE_OPTIONS value 2:
+        // combine inclusion regions as a union.
+        union.checked =
+            (
+                options & 2
+            ) !== 0;
+    }
+
+
+    const enabled =
+        Number(
+            settings.FENCE_ENABLE
+            ?? 0
+        ) === 1;
+
+
+    const enabledText =
+        document.getElementById(
+            "full-fence-enabled"
+        );
+
+
+    if (enabledText) {
+
+        enabledText.textContent =
+            enabled
+                ? "ENABLED"
+                : "DISABLED";
+
+        enabledText.className =
+            "value "
+            + (
+                enabled
+                    ? "map-geofence-enabled"
+                    : "map-geofence-disabled"
+            );
+    }
+}
+
+
+async function fullFenceLoadFromAutopilot(
+    refresh = true
+) {
+
+    fullFenceMessage(
+        "Downloading native fence "
+        + "from Pixhawk..."
+    );
+
+
+    try {
+
+        const response =
+            await fetch(
+                refresh
+                    ? (
+                        "/api/vehicles/uav/"
+                        + "geofence/refresh"
+                    )
+                    : (
+                        "/api/vehicles/uav/"
+                        + "geofence"
+                    ),
+                {
+                    method:
+                        refresh
+                            ? "POST"
+                            : "GET",
+
+                    cache:
+                        "no-store"
+                }
+            );
+
+
+        const data =
+            await response.json();
+
+
+        fullFenceState =
+            data;
+
+
+        if (!data.available) {
+
+            setText(
+                "full-fence-status",
+                "OFFLINE"
+            );
+
+            fullFenceMessage(
+                data.message
+                ?? "UAV autopilot offline."
+            );
+
+            return data;
+        }
+
+
+        if (!data.complete) {
+
+            setText(
+                "full-fence-status",
+                "INCOMPLETE"
+            );
+
+            fullFenceMessage(
+                data.message
+                ?? "Fence download incomplete."
+            );
+
+            return data;
+        }
+
+
+        fullFenceZones =
+            JSON.parse(
+                JSON.stringify(
+                    data.zones
+                    ?? []
+                )
+            );
+
+
+        fullFenceActive =
+            fullFenceZones.length
+                ? 0
+                : -1;
+
+
+        fullFenceDrawing =
+            false;
+
+
+        setText(
+            "full-fence-status",
+            "LOADED"
+        );
+
+
+        fullFencePopulateSettings(
+            data.settings
+        );
+
+
+        fullFenceRender();
+
+        fullFenceFitBounds();
+
+
+        fullFenceMessage(
+            `Loaded ${
+                fullFenceZones.length
+            } zone(s), ${
+                data.count
+            } MAVLink item(s).`
+        );
+
+
+        return data;
+
+
+    } catch (error) {
+
+        setText(
+            "full-fence-status",
+            "ERROR"
+        );
+
+
+        fullFenceMessage(
+            "Fence load failed: "
+            + String(error)
+        );
+
+
+        return null;
+    }
+}
+
+
+async function fullFenceUploadAll() {
+
+    fullFenceDrawing = false;
+
+
+    for (
+        let i = 0;
+        i < fullFenceZones.length;
+        i += 1
+    ) {
+
+        const zone =
+            fullFenceZones[i];
+
+
+        if (
+            zone.type.endsWith(
+                "_polygon"
+            )
+            &&
+            (
+                !Array.isArray(
+                    zone.points
+                )
+                ||
+                zone.points.length < 3
+            )
+        ) {
+
+            fullFenceMessage(
+                `Zone ${i + 1} requires `
+                + "at least 3 vertices."
+            );
+
+            return;
+        }
+
+
+        if (
+            zone.type.endsWith(
+                "_circle"
+            )
+            &&
+            !zone.center
+        ) {
+
+            fullFenceMessage(
+                `Zone ${i + 1} requires `
+                + "a circle center."
+            );
+
+            return;
+        }
+    }
+
+
+    const clearing =
+        fullFenceZones.length === 0;
+
+
+    const prompt =
+        clearing
+            ? (
+                "CLEAR ALL native UAV "
+                + "geofence zones from "
+                + "the Pixhawk?"
+            )
+            : (
+                `Upload all ${
+                    fullFenceZones.length
+                } UAV fence zone(s) `
+                + "to the Pixhawk and "
+                + "verify the complete read-back?"
+            );
+
+
+    if (!confirm(prompt)) {
+        return;
+    }
+
+
+    fullFenceMessage(
+        clearing
+            ? "Clearing native fence..."
+            : (
+                "Uploading complete fence "
+                + "and verifying read-back..."
+            )
+    );
+
+
+    try {
+
+        const response =
+            await fetch(
+                "/api/vehicles/uav/geofence",
+                {
+                    method: "POST",
+                    cache: "no-store",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body: JSON.stringify({
+                        zones:
+                            fullFenceZones
+                    })
+                }
+            );
+
+
+        const responseText =
+            await response.text();
+
+        let result;
+
+        try {
+
+            result =
+                JSON.parse(
+                    responseText
+                );
+
+        } catch (parseError) {
+
+            const preview =
+                responseText
+                .replace(
+                    /\\s+/g,
+                    " "
+                )
+                .slice(
+                    0,
+                    300
+                );
+
+            throw new Error(
+                "HTTP "
+                + response.status
+                + ": "
+                + preview
+            );
+        }
+
+
+        fullFenceMessage(
+            result.message
+            ?? (
+                result.success
+                    ? "Fence verified."
+                    : "Fence upload failed."
+            )
+        );
+
+
+        if (result.success) {
+
+            await fullFenceLoadFromAutopilot(
+                true
+            );
+        }
+
+
+    } catch (error) {
+
+        fullFenceMessage(
+            "Fence upload failed: "
+            + String(error)
+        );
+    }
+}
+
+
+async function fullFenceWriteSettings(
+    payload
+) {
+
+    const response =
+        await fetch(
+            (
+                "/api/vehicles/uav/"
+                + "geofence/settings"
+            ),
+            {
+                method: "POST",
+                cache: "no-store",
+
+                headers: {
+                    "Content-Type":
+                        "application/json"
+                },
+
+                body:
+                    JSON.stringify(
+                        payload
+                    )
+            }
+        );
+
+
+    return await response.json();
+}
+
+
+async function fullFenceApplySettings() {
+
+    const numericValue = id => {
+
+        const element =
+            document.getElementById(id);
+
+        if (!element) {
+            return null;
+        }
+
+        const value =
+            Number(
+                element.value
+            );
+
+        return Number.isFinite(value)
+            ? value
+            : null;
+    };
+
+
+    let fenceType = 0;
+
+
+    if (
+        document.getElementById(
+            "full-type-max"
+        )?.checked
+    ) {
+        fenceType |= 1;
+    }
+
+
+    if (
+        document.getElementById(
+            "full-type-circle"
+        )?.checked
+    ) {
+        fenceType |= 2;
+    }
+
+
+    if (
+        document.getElementById(
+            "full-type-zones"
+        )?.checked
+    ) {
+        fenceType |= 4;
+    }
+
+
+    if (
+        document.getElementById(
+            "full-type-min"
+        )?.checked
+    ) {
+        fenceType |= 8;
+    }
+
+
+    const previousOptions =
+        Number(
+            fullFenceState
+            ?.settings
+            ?.FENCE_OPTIONS
+            ?? 0
+        );
+
+
+    let fenceOptions =
+        previousOptions;
+
+
+    if (
+        document.getElementById(
+            "full-fence-union"
+        )?.checked
+    ) {
+
+        fenceOptions |= 2;
+
+    } else {
+
+        fenceOptions &= ~2;
+    }
+
+
+    const payload = {
+        FENCE_TYPE:
+            fenceType,
+
+        FENCE_ACTION:
+            numericValue(
+                "full-fence-action"
+            ),
+
+        FENCE_ALT_MAX:
+            numericValue(
+                "full-fence-alt-max"
+            ),
+
+        FENCE_ALT_MIN:
+            numericValue(
+                "full-fence-alt-min"
+            ),
+
+        FENCE_MARGIN:
+            numericValue(
+                "full-fence-margin"
+            ),
+
+        FENCE_RADIUS:
+            numericValue(
+                "full-fence-radius"
+            ),
+
+        FENCE_OPTIONS:
+            fenceOptions
+    };
+
+
+    fullFenceMessage(
+        "Writing and verifying "
+        + "fence settings..."
+    );
+
+
+    try {
+
+        const result =
+            await fullFenceWriteSettings(
+                payload
+            );
+
+
+        fullFenceMessage(
+            result.message
+            ?? (
+                result.success
+                    ? "Settings verified."
+                    : "Settings write failed."
+            )
+        );
+
+
+        if (result.success) {
+
+            await fullFenceLoadFromAutopilot(
+                false
+            );
+        }
+
+
+    } catch (error) {
+
+        fullFenceMessage(
+            "Settings write failed: "
+            + String(error)
+        );
+    }
+}
+
+
+async function fullFenceSetEnabled(
+    enabled
+) {
+
+    if (enabled) {
+
+        if (
+            !fullFenceState
+            ||
+            !fullFenceState.complete
+            ||
+            fullFenceZones.length === 0
+        ) {
+
+            fullFenceMessage(
+                "Cannot enable: no "
+                + "verified native fence "
+                + "is loaded."
+            );
+
+            return;
+        }
+
+
+        if (
+            !confirm(
+                "ENABLE the UAV hard fence?\\n\\n"
+                + "Confirm the intended zones, "
+                + "GPS and altitude reference "
+                + "are valid."
+            )
+        ) {
+            return;
+        }
+
+    } else {
+
+        if (
+            !confirm(
+                "DISABLE the UAV hard fence?"
+            )
+        ) {
+            return;
+        }
+    }
+
+
+    fullFenceMessage(
+        enabled
+            ? "Enabling hard fence..."
+            : "Disabling hard fence..."
+    );
+
+
+    try {
+
+        const result =
+            await fullFenceWriteSettings({
+                FENCE_ENABLE:
+                    enabled ? 1 : 0
+            });
+
+
+        fullFenceMessage(
+            result.message
+            ?? (
+                result.success
+                    ? "Fence state verified."
+                    : "Fence state write failed."
+            )
+        );
+
+
+        await fullFenceLoadFromAutopilot(
+            false
+        );
+
+
+    } catch (error) {
+
+        fullFenceMessage(
+            "Fence state write failed: "
+            + String(error)
+        );
+    }
+}
+
+
+/*
+ * Main Overview Map drawing input.
+ */
+map.on(
+    "click",
+    event => {
+
+        if (
+            !fullFenceDrawing
+            ||
+            fullFenceActive < 0
+            ||
+            fullFenceActive
+                >= fullFenceZones.length
+        ) {
+            return;
+        }
+
+
+        const zone =
+            fullFenceZones[
+                fullFenceActive
+            ];
+
+
+        if (
+            zone.type.endsWith(
+                "_polygon"
+            )
+        ) {
+
+            zone.points.push({
+                latitude:
+                    event.latlng.lat,
+
+                longitude:
+                    event.latlng.lng
+            });
+
+
+            fullFenceRender();
+
+
+            fullFenceMessage(
+                `${
+                    zone.points.length
+                } vertices. Continue `
+                + "clicking or press "
+                + "FINISH DRAWING."
+            );
+
+            return;
+        }
+
+
+        if (
+            zone.type.endsWith(
+                "_circle"
+            )
+        ) {
+
+            zone.center = {
+                latitude:
+                    event.latlng.lat,
+
+                longitude:
+                    event.latlng.lng
+            };
+
+
+            fullFenceDrawing = false;
+
+
+            fullFenceRender();
+
+
+            fullFenceMessage(
+                "Circle center placed. "
+                + "Set its radius in the "
+                + "zone list."
+            );
+        }
+    }
+);
+
+
+/*
+ * Compatibility wrapper for the previous startup loader.
+ */
+async function overviewLoadFence(
+    refresh = true
+) {
+
+    return await fullFenceLoadFromAutopilot(
+        refresh
+    );
+}
 
 
 function installTabHandlers() {
@@ -1822,6 +4027,19 @@ function makeVehiclePage(id, vehicle) {
                 PARAMETERS
             </button>
 
+            ${
+                vehicle.type === "UAV"
+                    ? `
+            <button
+                class="vehicle-subtab"
+                id="${id}-geofence-tab"
+                onclick="selectVehicleSubtab('${id}', 'geofence')">
+                GEOFENCE
+            </button>
+                    `
+                    : ""
+            }
+
         </div>
 
 
@@ -2015,6 +4233,67 @@ function makeVehiclePage(id, vehicle) {
             </div>
 
         </div>
+
+        ${
+            vehicle.type === "UAV"
+                ? `
+        <div
+            class="vehicle-panel"
+            id="${id}-geofence-panel">
+
+            <div class="card">
+
+                <h2>Native ArduPilot Geofence</h2>
+
+                <div
+                    class="geofence-status"
+                    id="${id}-geofence-status">
+                    Open this tab to download the Pixhawk fence.
+                </div>
+
+                <button
+                    class="control-button"
+                    style="margin-top:0;"
+                    onclick="refreshVehicleGeofence('${id}')">
+                    DOWNLOAD FROM AUTOPILOT
+                </button>
+
+                <div
+                    class="geofence-map"
+                    id="${id}-geofence-map">
+                </div>
+
+                <table class="geofence-table">
+
+                    <thead>
+                        <tr>
+                            <th>Seq</th>
+                            <th>Latitude</th>
+                            <th>Longitude</th>
+                            <th>Vertices</th>
+                        </tr>
+                    </thead>
+
+                    <tbody
+                        id="${id}-geofence-table-body">
+
+                        <tr>
+                            <td colspan="4">
+                                Fence not loaded.
+                            </td>
+                        </tr>
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        </div>
+                `
+                : ""
+        }
+
     `;
 
 
@@ -2032,72 +4311,69 @@ function selectVehicleSubtab(
     tabName
 ) {
 
-    const statusTab =
+    const page =
         document.getElementById(
-            `${vehicleId}-status-tab`
+            `${vehicleId}-page`
         );
 
-    const parameterTab =
-        document.getElementById(
-            `${vehicleId}-parameters-tab`
-        );
-
-    const statusPanel =
-        document.getElementById(
-            `${vehicleId}-status-panel`
-        );
-
-    const parameterPanel =
-        document.getElementById(
-            `${vehicleId}-parameters-panel`
-        );
-
-
-    const showParameters =
-        tabName === "parameters";
-
-
-    if (statusTab) {
-        statusTab.classList.toggle(
-            "active",
-            !showParameters
-        );
-    }
-
-    if (parameterTab) {
-        parameterTab.classList.toggle(
-            "active",
-            showParameters
-        );
-    }
-
-    if (statusPanel) {
-        statusPanel.classList.toggle(
-            "active",
-            !showParameters
-        );
-    }
-
-    if (parameterPanel) {
-        parameterPanel.classList.toggle(
-            "active",
-            showParameters
-        );
+    if (!page) {
+        return;
     }
 
 
-    if (showParameters) {
+    [
+        "status",
+        "parameters",
+        "geofence"
+    ].forEach(name => {
 
-        const state =
-            vehicleParameterState[
+        const tab =
+            document.getElementById(
+                `${vehicleId}-${name}-tab`
+            );
+
+        const panel =
+            document.getElementById(
+                `${vehicleId}-${name}-panel`
+            );
+
+
+        if (tab) {
+            tab.classList.toggle(
+                "active",
+                name === tabName
+            );
+        }
+
+        if (panel) {
+            panel.classList.toggle(
+                "active",
+                name === tabName
+            );
+        }
+    });
+
+
+    if (tabName === "parameters") {
+
+        if (
+            !vehicleParameterState[
                 vehicleId
-            ];
-
-        if (!state) {
+            ]
+        ) {
             loadVehicleParameters(
                 vehicleId
             );
         }
+    }
+
+
+    if (tabName === "geofence") {
+
+        loadVehicleGeofence(
+            vehicleId,
+            false
+        );
     }
 }
 
@@ -2534,6 +4810,323 @@ async function writeVehicleParameter(
                 + error;
         }
     }
+}
+
+
+
+function ensureVehicleGeofenceMap(
+    vehicleId
+) {
+
+    if (
+        vehicleGeofenceMaps[
+            vehicleId
+        ]
+    ) {
+        return vehicleGeofenceMaps[
+            vehicleId
+        ];
+    }
+
+
+    const element =
+        document.getElementById(
+            `${vehicleId}-geofence-map`
+        );
+
+    if (!element) {
+        return null;
+    }
+
+
+    const fenceMap =
+        L.map(element).setView(
+            [30.21, -92.02],
+            16
+        );
+
+
+    L.tileLayer(
+        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        {
+            maxZoom: 20,
+            attribution:
+                "&copy; OpenStreetMap"
+        }
+    ).addTo(fenceMap);
+
+
+    vehicleGeofenceMaps[
+        vehicleId
+    ] = fenceMap;
+
+
+    setTimeout(
+        () => fenceMap.invalidateSize(),
+        50
+    );
+
+
+    return fenceMap;
+}
+
+
+function renderVehicleGeofence(
+    vehicleId
+) {
+
+    const state =
+        vehicleGeofenceState[
+            vehicleId
+        ];
+
+    const status =
+        document.getElementById(
+            `${vehicleId}-geofence-status`
+        );
+
+    const body =
+        document.getElementById(
+            `${vehicleId}-geofence-table-body`
+        );
+
+
+    if (!state) {
+        return;
+    }
+
+
+    if (status) {
+
+        if (!state.available) {
+
+            status.textContent =
+                "Autopilot geofence backend offline.";
+
+        } else {
+
+            status.textContent =
+                `Native fence: `
+                + `${state.count}/`
+                + `${state.expected ?? "?"}`
+                + (
+                    state.complete
+                        ? " | COMPLETE"
+                        : " | INCOMPLETE"
+                )
+                + (
+                    state.armed
+                        ? " | VEHICLE ARMED"
+                        : " | VEHICLE DISARMED"
+                );
+        }
+    }
+
+
+    const vertices =
+        Array.isArray(
+            state.inclusion_vertices
+        )
+            ? state.inclusion_vertices
+            : [];
+
+
+    if (body) {
+
+        if (vertices.length === 0) {
+
+            body.innerHTML = `
+                <tr>
+                    <td colspan="4">
+                        No inclusion polygon loaded.
+                    </td>
+                </tr>
+            `;
+
+        } else {
+
+            body.innerHTML =
+                vertices.map(point => `
+                    <tr>
+                        <td>
+                            ${point.seq}
+                        </td>
+
+                        <td>
+                            ${Number(
+                                point.latitude
+                            ).toFixed(7)}
+                        </td>
+
+                        <td>
+                            ${Number(
+                                point.longitude
+                            ).toFixed(7)}
+                        </td>
+
+                        <td>
+                            ${
+                                point.polygon_vertex_count
+                                ?? "--"
+                            }
+                        </td>
+                    </tr>
+                `).join("");
+        }
+    }
+
+
+    const fenceMap =
+        ensureVehicleGeofenceMap(
+            vehicleId
+        );
+
+    if (!fenceMap) {
+        return;
+    }
+
+
+    if (
+        vehicleGeofenceLayers[
+            vehicleId
+        ]
+    ) {
+
+        fenceMap.removeLayer(
+            vehicleGeofenceLayers[
+                vehicleId
+            ]
+        );
+
+        delete vehicleGeofenceLayers[
+            vehicleId
+        ];
+    }
+
+
+    if (vertices.length >= 3) {
+
+        const points =
+            vertices.map(point => [
+                Number(point.latitude),
+                Number(point.longitude)
+            ]);
+
+
+        const polygon =
+            L.polygon(points);
+
+        polygon.addTo(
+            fenceMap
+        );
+
+
+        vehicleGeofenceLayers[
+            vehicleId
+        ] = polygon;
+
+
+        fenceMap.fitBounds(
+            polygon.getBounds(),
+            {
+                padding: [25, 25]
+            }
+        );
+    }
+
+
+    setTimeout(
+        () => fenceMap.invalidateSize(),
+        50
+    );
+}
+
+
+async function loadVehicleGeofence(
+    vehicleId,
+    forceRefresh = false
+) {
+
+    const status =
+        document.getElementById(
+            `${vehicleId}-geofence-status`
+        );
+
+
+    if (status) {
+        status.textContent =
+            forceRefresh
+                ? "Downloading native fence..."
+                : "Loading geofence cache...";
+    }
+
+
+    try {
+
+        const path =
+            forceRefresh
+                ? (
+                    `/api/vehicles/`
+                    + `${vehicleId}/`
+                    + `geofence/refresh`
+                )
+                : (
+                    `/api/vehicles/`
+                    + `${vehicleId}/`
+                    + `geofence`
+                );
+
+
+        const options = {
+            cache: "no-store"
+        };
+
+
+        if (forceRefresh) {
+            options.method = "POST";
+        }
+
+
+        const response =
+            await fetch(
+                path,
+                options
+            );
+
+
+        const data =
+            await response.json();
+
+
+        vehicleGeofenceState[
+            vehicleId
+        ] = data;
+
+
+        renderVehicleGeofence(
+            vehicleId
+        );
+
+
+    } catch (error) {
+
+        if (status) {
+            status.textContent =
+                "Geofence request failed: "
+                + error;
+        }
+    }
+}
+
+
+async function refreshVehicleGeofence(
+    vehicleId
+) {
+
+    await loadVehicleGeofence(
+        vehicleId,
+        true
+    );
 }
 
 
@@ -4371,6 +6964,50 @@ setInterval(
     500
 );
 
+
+/*
+ * Automatically synchronize the Overview Map with the UAV's
+ * native ArduPilot fence. No operator button is required.
+ *
+ * The dashboard may start before the UAV, so retry briefly
+ * until a complete native fence is available.
+ */
+let overviewFenceStartupAttempts = 0;
+
+async function overviewAutoLoadFence() {
+
+    overviewFenceStartupAttempts += 1;
+
+    const data =
+        await overviewLoadFence(
+            true
+        );
+
+    if (
+        data
+        && data.available
+        && data.complete
+    ) {
+        return;
+    }
+
+    if (
+        overviewFenceStartupAttempts
+        < 10
+    ) {
+
+        setTimeout(
+            overviewAutoLoadFence,
+            2000
+        );
+    }
+}
+
+setTimeout(
+    overviewAutoLoadFence,
+    1500
+);
+
 </script>
 
 </body>
@@ -4500,6 +7137,10 @@ class RobotXDashboard(Node):
 
         self.robocommand_client = RoboCommandClient(
             vehicle_snapshot=self.snapshot,
+            uav_geofence_snapshot=(
+                self.uav_mavlink_client
+                .fence_snapshot
+            ),
         )
 
         self.robocommand_client.start()
@@ -4913,6 +7554,385 @@ class RobotXDashboard(Node):
             ),
             endpoint="set_vehicle_parameter",
             view_func=set_vehicle_parameter,
+            methods=["POST"],
+        )
+
+
+        # ----------------------------------------------------
+        # Native ArduPilot geofence management
+        # ----------------------------------------------------
+
+        FENCE_PARAMETERS = (
+            "FENCE_ENABLE",
+            "FENCE_TYPE",
+            "FENCE_ACTION",
+            "FENCE_ALT_MAX",
+            "FENCE_ALT_MIN",
+            "FENCE_MARGIN",
+            "FENCE_RADIUS",
+            "FENCE_OPTIONS",
+            "FENCE_ALT_MAX_TP",
+            "FENCE_ALT_MIN_TP",
+            "FENCE_TOTAL",
+        )
+
+
+        def geofence_settings(
+            client
+        ):
+
+            snapshot = (
+                client.parameter_snapshot()
+            )
+
+            values = {
+                item["name"]:
+                    item["value"]
+                for item in snapshot.get(
+                    "parameters",
+                    []
+                )
+            }
+
+            return {
+                name: values.get(name)
+                for name
+                in FENCE_PARAMETERS
+            }
+
+
+        def enrich_geofence(
+            client,
+            result,
+        ):
+
+            output = dict(result)
+
+            parameters = (
+                client.parameter_snapshot()
+            )
+
+            output["settings"] = (
+                geofence_settings(
+                    client
+                )
+            )
+
+            output["write_allowed"] = bool(
+                parameters.get(
+                    "write_allowed",
+                    False,
+                )
+            )
+
+            return output
+
+
+        def vehicle_geofence(
+            vehicle_id
+        ):
+
+            client = parameter_client(
+                vehicle_id
+            )
+
+            if client is None:
+
+                return jsonify({
+                    "success": False,
+                    "vehicle_id":
+                        vehicle_id,
+                    "available": False,
+                    "write_allowed": False,
+                    "message": (
+                        "Direct MAVLink "
+                        "geofence backend "
+                        "is not attached"
+                    ),
+                })
+
+
+            result = enrich_geofence(
+                client,
+                client.fence_snapshot(),
+            )
+
+            result["vehicle_id"] = (
+                vehicle_id
+            )
+
+            return jsonify(result)
+
+
+        def refresh_vehicle_geofence(
+            vehicle_id
+        ):
+
+            client = parameter_client(
+                vehicle_id
+            )
+
+            if client is None:
+
+                return jsonify({
+                    "success": False,
+                    "vehicle_id":
+                        vehicle_id,
+                    "message": (
+                        "Direct MAVLink "
+                        "geofence backend "
+                        "is not attached"
+                    ),
+                })
+
+
+            result = enrich_geofence(
+                client,
+                client.download_fence(),
+            )
+
+            result["vehicle_id"] = (
+                vehicle_id
+            )
+
+            return jsonify(result)
+
+
+        def write_vehicle_geofence(
+            vehicle_id
+        ):
+
+            if vehicle_id != "uav":
+
+                return jsonify({
+                    "success": False,
+                    "message": (
+                        "Native fence editing "
+                        "is currently enabled "
+                        "only for the UAV"
+                    ),
+                }), 400
+
+
+            client = parameter_client(
+                vehicle_id
+            )
+
+
+            if client is None:
+
+                return jsonify({
+                    "success": False,
+                    "message": (
+                        "Direct MAVLink "
+                        "geofence backend "
+                        "is not attached"
+                    ),
+                }), 503
+
+
+            data = request.get_json(
+                silent=True
+            ) or {}
+
+
+            if "zones" in data:
+
+                result = (
+                    client
+                    .upload_fence_zones(
+                        data["zones"]
+                    )
+                )
+
+            else:
+
+                result = (
+                    client.upload_fence(
+                        data.get(
+                            "vertices",
+                            [],
+                        )
+                    )
+                )
+
+
+            result["vehicle_id"] = (
+                vehicle_id
+            )
+
+            return jsonify(result)
+
+
+        def write_geofence_settings(
+            vehicle_id
+        ):
+
+            if vehicle_id != "uav":
+
+                return jsonify({
+                    "success": False,
+                    "message": (
+                        "Fence settings are "
+                        "currently enabled only "
+                        "for the UAV"
+                    ),
+                }), 400
+
+
+            client = parameter_client(
+                vehicle_id
+            )
+
+
+            if client is None:
+
+                return jsonify({
+                    "success": False,
+                    "message": (
+                        "Direct MAVLink "
+                        "backend unavailable"
+                    ),
+                }), 503
+
+
+            data = request.get_json(
+                silent=True
+            ) or {}
+
+
+            if not isinstance(
+                data,
+                dict,
+            ):
+
+                return jsonify({
+                    "success": False,
+                    "message":
+                        "Invalid settings payload",
+                }), 400
+
+
+            allowed = set(
+                FENCE_PARAMETERS
+            )
+
+            allowed.discard(
+                "FENCE_TOTAL"
+            )
+
+
+            results = {}
+
+
+            for name, value in data.items():
+
+                if name not in allowed:
+                    continue
+
+
+                if value is None:
+                    continue
+
+
+                result = (
+                    client.set_parameter(
+                        name,
+                        value,
+                    )
+                )
+
+                results[name] = result
+
+
+                if not result.get(
+                    "success",
+                    False,
+                ):
+
+                    return jsonify({
+                        "success": False,
+                        "message": (
+                            f"{name}: "
+                            + str(
+                                result.get(
+                                    "message",
+                                    "write failed",
+                                )
+                            )
+                        ),
+                        "results": results,
+                    })
+
+
+            return jsonify({
+                "success": True,
+                "message": (
+                    "Fence settings written "
+                    "and verified."
+                ),
+                "results": results,
+                "settings":
+                    geofence_settings(
+                        client
+                    ),
+            })
+
+
+        app.add_url_rule(
+            (
+                "/api/vehicles/"
+                "<vehicle_id>/geofence"
+            ),
+            endpoint="vehicle_geofence",
+            view_func=vehicle_geofence,
+            methods=["GET"],
+        )
+
+
+        app.add_url_rule(
+            (
+                "/api/vehicles/"
+                "<vehicle_id>/"
+                "geofence/refresh"
+            ),
+            endpoint=(
+                "refresh_vehicle_geofence"
+            ),
+            view_func=(
+                refresh_vehicle_geofence
+            ),
+            methods=["POST"],
+        )
+
+
+        app.add_url_rule(
+            (
+                "/api/vehicles/"
+                "<vehicle_id>/geofence"
+            ),
+            endpoint=(
+                "write_vehicle_geofence"
+            ),
+            view_func=(
+                write_vehicle_geofence
+            ),
+            methods=["POST"],
+        )
+
+
+        app.add_url_rule(
+            (
+                "/api/vehicles/"
+                "<vehicle_id>/"
+                "geofence/settings"
+            ),
+            endpoint=(
+                "write_geofence_settings"
+            ),
+            view_func=(
+                write_geofence_settings
+            ),
             methods=["POST"],
         )
 
