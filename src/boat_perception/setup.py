@@ -22,6 +22,7 @@ setup(
     license='TODO',
     entry_points={
         'console_scripts': [
+            'buoy_detector_multi = boat_perception.buoy_detector_multi:main',
             'buoy_detector = boat_perception.buoy_detector:main',
             'buoy_detector_3d = boat_perception.buoy_detector_3d:main',
             'gate_detector = boat_perception.gate_detector:main'

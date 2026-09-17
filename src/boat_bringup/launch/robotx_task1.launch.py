@@ -35,6 +35,9 @@ def generate_launch_description():
     start_dashboard_bridge = LaunchConfiguration(
         'start_dashboard_bridge'
     )
+    start_mission_logger = LaunchConfiguration(
+        'start_mission_logger'
+    )
     start_esp32 = LaunchConfiguration('start_esp32')
 
     esp32_serial_port = LaunchConfiguration(
@@ -71,6 +74,14 @@ def generate_launch_description():
             description=(
                 'Start Jetson TCP bridge for the '
                 'RobotX ground station.'
+            ),
+        ),
+
+        DeclareLaunchArgument(
+            'start_mission_logger',
+            default_value='true',
+            description=(
+                'Start the Jetson-local 20 Hz mission diagnostic logger.'
             ),
         ),
 
@@ -144,6 +155,14 @@ def generate_launch_description():
         ),
     )
 
+    mission_logger = Node(
+        package='boat_dashboard_bridge',
+        executable='mission_logger',
+        name='mission_logger',
+        output='screen',
+        condition=IfCondition(start_mission_logger),
+    )
+
     esp32_status = IncludeLaunchDescription(
         package_launch(
             'boat_vehicle',
@@ -165,6 +184,7 @@ def generate_launch_description():
             ' Two-gate ctrl : ON\n'
             ' Vehicle safety: ON\n'
             ' TCP bridge    : ON\n'
+            ' Mission logger: ON (5 s pre-arm / 20 Hz CSV)\n'
             ' Xbox operator : ON via dashboard/bridge\n'
             ' Dashboard     : ON\n'
             ' ESP32/light   : ON\n'
@@ -186,6 +206,7 @@ def generate_launch_description():
             control,
             vehicle,
             dashboard_bridge,
+            mission_logger,
             esp32_status,
         ]
     )

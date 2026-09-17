@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import copy
+import json
 import math
 import time
 
@@ -87,7 +88,7 @@ class MavrosCommandBridge(Node):
         self.operator_manual_axis_max = float(
             self.declare_parameter(
                 'operator_manual_axis_max',
-                150.0
+                500.0
             ).value
         )
 
@@ -155,15 +156,6 @@ class MavrosCommandBridge(Node):
                 'HOLD'
             ).value
         ).upper()
-
-        # ArduRover numeric custom mode used in SET_MODE.
-        # HOLD = 4.
-        self.stop_custom_mode = str(
-            self.declare_parameter(
-                'stop_custom_mode',
-                '4'
-            ).value
-        )
 
         self.declare_parameter(
             'autonomy_enabled',
@@ -278,6 +270,14 @@ class MavrosCommandBridge(Node):
         self.last_hold_request_monotonic = 0.0
         self.last_stop_reason = None
 
+        # Intentional Task 1 pause between Gate 1 and Gate 2.
+        # Unlike a safety HOLD, this does NOT revoke autonomy.
+        self.intergate_hold_active = False
+        self.intergate_resume_requested = False
+
+        self.autonomy_mode_future = None
+        self.last_autonomy_mode_request_monotonic = 0.0
+
         self.cmd_pub = self.create_publisher(
             TwistStamped,
             self.output_topic,
@@ -335,6 +335,18 @@ class MavrosCommandBridge(Node):
         self.battery_status_pub = self.create_publisher(
             String,
             '/vehicle/battery_safety_status',
+            10
+        )
+
+        self.software_stop_pub = self.create_publisher(
+            Bool,
+            '/vehicle/software_stop_state',
+            10
+        )
+
+        self.control_diagnostics_pub = self.create_publisher(
+            String,
+            '/vehicle/control_diagnostics',
             10
         )
 
@@ -567,32 +579,37 @@ class MavrosCommandBridge(Node):
         )
 
     def begin_operator_takeover(self):
-        if self.operator_rearm_required:
-            return
+        # A fresh LB press is the highest-priority software
+        # control-authority request.
+        #
+        # It explicitly clears the software stop, revokes
+        # autonomy, neutralizes GUIDED velocity, and requests
+        # MANUAL regardless of the current ArduRover mode.
+        self.operator_rearm_required = False
 
         if bool(
             self.get_parameter(
                 'software_estop'
             ).value
         ):
+            self.set_parameters([
+                Parameter(
+                    'software_estop',
+                    Parameter.Type.BOOL,
+                    False
+                )
+            ])
+
+            self.publish_software_stop_state()
+
             self.get_logger().warn(
-                'OPERATOR TAKEOVER BLOCKED: '
-                'software stop active'
-            )
-            return
-
-        battery_ok, battery_reason = (
-            self.battery_propulsion_allowed()
-        )
-
-        if not battery_ok:
-            self.get_logger().error(
-                'OPERATOR TAKEOVER BLOCKED: '
-                + battery_reason
+                'LB TAKEOVER: software stop cleared'
             )
 
-            self.operator_rearm_required = True
-            return
+        self.set_autonomy(False)
+
+        self.publish_velocity_neutral()
+        self.clear_stored_command()
 
         state = self.vehicle_state
 
@@ -601,45 +618,13 @@ class MavrosCommandBridge(Node):
             or not state.connected
         ):
             self.get_logger().error(
-                'OPERATOR TAKEOVER BLOCKED: '
-                'MAVROS disconnected'
+                'LB TAKEOVER: MAVROS disconnected; '
+                'cannot command ArduRover MANUAL'
             )
-
-            self.operator_rearm_required = True
             return
 
-        current_mode = str(
-            state.mode
-        ).upper()
-
-        acceptable_takeover_modes = set(
-            self.allowed_modes
-        )
-
-        acceptable_takeover_modes.add(
-            self.stop_mode
-        )
-
-        acceptable_takeover_modes.add(
-            self.operator_mode
-        )
-
-        if current_mode not in acceptable_takeover_modes:
-            self.get_logger().error(
-                'OPERATOR TAKEOVER BLOCKED: '
-                f'current mode {current_mode} is not '
-                'owned by the command bridge'
-            )
-
-            self.operator_rearm_required = True
-            return
-
-        # Operator immediately wins over autonomous velocity.
-        self.set_autonomy(False)
-        self.publish_velocity_neutral()
-        self.clear_stored_command()
-
-        # Never carry a stale Xbox command into a new session.
+        # Never carry stale browser stick data into a new
+        # operator session.
         self.operator_command = None
         self.operator_command_time = None
 
@@ -654,17 +639,19 @@ class MavrosCommandBridge(Node):
         self.hold_required = False
         self.last_stop_reason = None
 
-        # MANUAL is always entered with an explicit neutral.
+        # MANUAL transition always begins at neutral.
         self.publish_manual_neutral()
 
         self.get_logger().warn(
-            'OPERATOR TAKEOVER: autonomy revoked; '
-            'neutral sent; requesting MANUAL'
+            'LB TAKEOVER: autonomy revoked; '
+            'requesting MANUAL from current mode '
+            + str(state.mode)
         )
 
         self.request_operator_mode(
             force=True
         )
+
 
     def operator_stop_to_hold(
         self,
@@ -731,12 +718,9 @@ class MavrosCommandBridge(Node):
 
             return
 
-        # Rising edge = operator takeover request.
-        if (
-            active
-            and not previous
-            and not self.operator_rearm_required
-        ):
+        # Every fresh LB press is a takeover request.
+        if active and not previous:
+            self.operator_rearm_required = False
             self.begin_operator_takeover()
 
     def battery_is_fresh(self):
@@ -960,26 +944,91 @@ class MavrosCommandBridge(Node):
     def mission_state_callback(self, msg):
         text = str(msg.data).strip()
 
-        # Ordinary WAIT_GATE / TRACK_GATE transitions must NOT
-        # change ArduRover mode. Only final mission completion
-        # converts the vehicle to HOLD.
+        autonomy_enabled = bool(
+            self.get_parameter(
+                'autonomy_enabled'
+            ).value
+        )
+
+        software_estop = bool(
+            self.get_parameter(
+                'software_estop'
+            ).value
+        )
+
+        # -------------------------------------------------------------
+        # INTENTIONAL INTER-GATE HOLD
+        # -------------------------------------------------------------
+        if text.startswith('WAIT_GATE_2'):
+            if (
+                autonomy_enabled
+                and not software_estop
+            ):
+                if not self.intergate_hold_active:
+                    self.get_logger().warning(
+                        'INTER-GATE PAUSE: '
+                        'Gate 1 complete; requesting HOLD '
+                        'while waiting for Gate 2'
+                    )
+
+                self.intergate_hold_active = True
+                self.intergate_resume_requested = False
+
+                # Overwrite the final PASS_GATE velocity immediately.
+                self.publish_velocity_neutral()
+
+                # Never replay a Gate 1 command after entering HOLD.
+                self.clear_stored_command()
+
+            return
+
+        # -------------------------------------------------------------
+        # GATE 2 ACQUIRED: RESUME GUIDED
+        # -------------------------------------------------------------
+        if text.startswith('TRACK_GATE_2'):
+            if (
+                autonomy_enabled
+                and self.intergate_hold_active
+                and not software_estop
+            ):
+                self.intergate_hold_active = False
+                self.intergate_resume_requested = True
+
+                # Stay neutral until GUIDED is positively confirmed.
+                self.publish_velocity_neutral()
+                self.clear_stored_command()
+
+                self.get_logger().warning(
+                    'INTER-GATE RESUME: '
+                    'Gate 2 acquired; requesting GUIDED'
+                )
+
+            return
+
+        # -------------------------------------------------------------
+        # FINAL TASK COMPLETION
+        # -------------------------------------------------------------
         if not text.startswith('MISSION_COMPLETE'):
             return
 
-        # Avoid repeatedly retriggering an already-latched stop.
-        if (
-            self.last_stop_reason == 'mission complete'
-            and self.hold_required
-        ):
+        if self.last_stop_reason == 'mission complete':
             return
 
-        self.get_logger().warn(
-            'MISSION COMPLETE: stopping propulsion and requesting HOLD'
+        self.get_logger().warning(
+            'MISSION COMPLETE: '
+            'stopping GUIDED velocity authority; '
+            'follower will request LOITER'
         )
 
-        self.trip_to_hold(
-            'mission complete'
-        )
+        self.publish_velocity_neutral()
+        self.clear_stored_command()
+
+        self.set_autonomy(False)
+
+        # Do not fight the follower's final LOITER request with HOLD.
+        self.hold_required = False
+
+        self.last_stop_reason = 'mission complete'
 
     def command_callback(self, msg):
         self.last_command = msg
@@ -1068,6 +1117,11 @@ class MavrosCommandBridge(Node):
         if not enabled:
             self.autonomy_enable_time = None
 
+            # A real autonomy revocation cancels any intentional
+            # inter-gate pause/resume sequence.
+            self.intergate_hold_active = False
+            self.intergate_resume_requested = False
+
     def hold_done(self, future, reason):
         try:
             result = future.result()
@@ -1094,6 +1148,116 @@ class MavrosCommandBridge(Node):
 
         finally:
             self.hold_future = None
+
+    def autonomy_mode_done(self, future):
+        try:
+            result = future.result()
+
+            if (
+                result is None
+                or not result.mode_sent
+            ):
+                self.get_logger().error(
+                    'GUIDED mode request rejected '
+                    'during inter-gate resume'
+                )
+            else:
+                self.get_logger().warning(
+                    'GUIDED mode request sent '
+                    'during inter-gate resume'
+                )
+
+        except Exception as exc:
+            self.get_logger().error(
+                f'GUIDED mode request error: {exc}'
+            )
+
+        finally:
+            self.autonomy_mode_future = None
+
+
+    def request_autonomy_mode(self, force=False):
+        if (
+            not self.intergate_resume_requested
+            or self.intergate_hold_active
+            or not bool(
+                self.get_parameter(
+                    'autonomy_enabled'
+                ).value
+            )
+        ):
+            return
+
+        state = self.vehicle_state
+
+        if (
+            state is None
+            or not state.connected
+        ):
+            return
+
+        mode = str(state.mode).upper()
+
+        if mode in self.allowed_modes:
+            self.intergate_resume_requested = False
+            return
+
+        # The bridge is only allowed to resume automatically
+        # from the intentional HOLD it created.
+        if mode != self.stop_mode:
+            self.trip_to_hold(
+                'unexpected mode during inter-gate resume: '
+                f'{state.mode}'
+            )
+            return
+
+        if (
+            self.autonomy_mode_future is not None
+            and not self.autonomy_mode_future.done()
+        ):
+            return
+
+        # Do not overlap another mode transition.
+        if (
+            self.hold_future is not None
+            and not self.hold_future.done()
+        ):
+            return
+
+        if (
+            self.operator_mode_future is not None
+            and not self.operator_mode_future.done()
+        ):
+            return
+
+        now = time.monotonic()
+
+        if (
+            not force
+            and (
+                now
+                - self.last_autonomy_mode_request_monotonic
+                < self.hold_retry_period
+            )
+        ):
+            return
+
+        if not self.mode_client.service_is_ready():
+            return
+
+        self.last_autonomy_mode_request_monotonic = now
+
+        request = SetMode.Request()
+        request.base_mode = 0
+        request.custom_mode = self.allowed_modes[0]
+
+        self.autonomy_mode_future = (
+            self.mode_client.call_async(request)
+        )
+
+        self.autonomy_mode_future.add_done_callback(
+            self.autonomy_mode_done
+        )
 
     def request_hold(
         self,
@@ -1158,7 +1322,7 @@ class MavrosCommandBridge(Node):
 
         request = SetMode.Request()
         request.base_mode = 0
-        request.custom_mode = self.stop_custom_mode
+        request.custom_mode = self.stop_mode
 
         self.hold_future = (
             self.mode_client.call_async(request)
@@ -1205,6 +1369,336 @@ class MavrosCommandBridge(Node):
             force=True
         )
 
+    def command_age(self):
+        """Return age of the latest autonomy command in seconds."""
+
+        if self.last_command_time is None:
+            return None
+
+        return (
+            self.get_clock().now()
+            - self.last_command_time
+        ).nanoseconds / 1e9
+
+    def diagnostic_bridge_reason(self):
+        """Describe the control-authority branch update() will take.
+
+        This mirrors the existing update() priority order but does not
+        change state, publish propulsion commands, or request a mode.
+        """
+
+        software_estop = bool(
+            self.get_parameter(
+                'software_estop'
+            ).value
+        )
+
+        autonomy_enabled = bool(
+            self.get_parameter(
+                'autonomy_enabled'
+            ).value
+        )
+
+        state = self.vehicle_state
+        connected = bool(
+            state is not None
+            and state.connected
+        )
+
+        mode = (
+            str(state.mode).upper()
+            if state is not None
+            else 'UNKNOWN'
+        )
+
+        # HOLD handling is the highest-priority update() branch.
+        if self.hold_required:
+            return 'HOLD_REQUIRED'
+
+        # ---------------------------------------------------------
+        # OPERATOR AUTHORITY
+        # ---------------------------------------------------------
+        if (
+            self.operator_requested
+            or self.operator_active
+            or self.operator_session_owned
+        ):
+            if software_estop:
+                return 'OPERATOR_BLOCKED_SOFTWARE_ESTOP'
+
+            if (
+                not self.operator_deadman
+                or not self.operator_deadman_is_fresh()
+            ):
+                return 'OPERATOR_DEADMAN_STALE'
+
+            if self.operator_rearm_required:
+                return 'OPERATOR_REARM_REQUIRED'
+
+            if not connected:
+                return 'OPERATOR_MAVROS_DISCONNECTED'
+
+            if not self.operator_requested:
+                return 'OPERATOR_NEUTRAL_NOT_REQUESTED'
+
+            if mode != self.operator_mode:
+                return 'OPERATOR_WAITING_FOR_MANUAL'
+
+            if (
+                self.operator_command is None
+                or self.operator_command_time is None
+            ):
+                if self.operator_enable_time is not None:
+                    age = (
+                        self.get_clock().now()
+                        - self.operator_enable_time
+                    ).nanoseconds / 1e9
+
+                    if age <= self.operator_timeout:
+                        return 'OPERATOR_INITIAL_COMMAND_GRACE'
+
+                return 'OPERATOR_NO_FRESH_COMMAND'
+
+            if not self.operator_command_is_fresh():
+                return 'OPERATOR_COMMAND_STALE'
+
+            if not self.command_is_finite(
+                self.operator_command
+            ):
+                return 'OPERATOR_COMMAND_NONFINITE'
+
+            return 'OPERATOR_AUTHORIZED'
+
+        # ---------------------------------------------------------
+        # NON-OPERATOR SAFETY
+        # ---------------------------------------------------------
+        if software_estop:
+            return 'SOFTWARE_ESTOP'
+
+        if not autonomy_enabled:
+            return 'AUTONOMY_DISABLED'
+
+        if not connected:
+            return 'MAVROS_DISCONNECTED'
+
+        # ---------------------------------------------------------
+        # AUTONOMY AUTHORITY
+        # ---------------------------------------------------------
+        if self.intergate_hold_active:
+            if mode == self.stop_mode:
+                return 'INTERGATE_HOLD'
+
+            if mode not in self.allowed_modes:
+                return 'INTERGATE_HOLD_UNEXPECTED_MODE'
+
+            return 'INTERGATE_HOLD_REQUESTING_HOLD'
+
+        if self.intergate_resume_requested:
+            if mode in self.allowed_modes:
+                return 'INTERGATE_RESUME_GUIDED_CONFIRMED'
+
+            if mode != self.stop_mode:
+                return 'INTERGATE_RESUME_UNEXPECTED_MODE'
+
+            return 'INTERGATE_RESUME_REQUESTING_GUIDED'
+
+        if mode not in self.allowed_modes:
+            return 'MODE_NOT_ALLOWED'
+
+        if (
+            self.last_command is None
+            or self.last_command_time is None
+        ):
+            if self.autonomy_enable_time is not None:
+                since_enable = (
+                    self.get_clock().now()
+                    - self.autonomy_enable_time
+                ).nanoseconds / 1e9
+
+                if (
+                    since_enable
+                    <= self.initial_command_timeout
+                ):
+                    return 'INITIAL_COMMAND_GRACE'
+
+            return 'NO_FRESH_COMMAND'
+
+        age = self.command_age()
+
+        if (
+            age is None
+            or age > self.deadman_timeout
+        ):
+            return 'COMMAND_STALE'
+
+        if not self.command_is_finite(
+            self.last_command
+        ):
+            return 'COMMAND_NONFINITE'
+
+        if self.command_is_zero(
+            self.last_command
+        ):
+            return 'AUTHORIZED_ZERO'
+
+        return 'AUTHORIZED'
+
+    def publish_control_diagnostics(self):
+        """Publish a read-only snapshot of bridge authorization state."""
+
+        try:
+            reason = self.diagnostic_bridge_reason()
+
+            software_estop = bool(
+                self.get_parameter(
+                    'software_estop'
+                ).value
+            )
+
+            autonomy_enabled = bool(
+                self.get_parameter(
+                    'autonomy_enabled'
+                ).value
+            )
+
+            state = self.vehicle_state
+
+            connected = bool(
+                state is not None
+                and state.connected
+            )
+
+            armed = bool(
+                state is not None
+                and state.armed
+            )
+
+            mode = (
+                str(state.mode).upper()
+                if state is not None
+                else 'UNKNOWN'
+            )
+
+            mode_allowed = bool(
+                connected
+                and mode in self.allowed_modes
+            )
+
+            input_age = self.command_age()
+
+            command_fresh = bool(
+                self.last_command is not None
+                and input_age is not None
+                and input_age <= self.deadman_timeout
+            )
+
+            command_zero = (
+                None
+                if self.last_command is None
+                else bool(
+                    self.command_is_zero(
+                        self.last_command
+                    )
+                )
+            )
+
+            input_linear = (
+                None
+                if self.last_command is None
+                else float(
+                    self.last_command.twist.linear.x
+                )
+            )
+
+            input_yaw = (
+                None
+                if self.last_command is None
+                else float(
+                    self.last_command.twist.angular.z
+                )
+            )
+
+            output_authorized = bool(
+                reason in (
+                    'AUTHORIZED',
+                    'AUTHORIZED_ZERO',
+                )
+            )
+
+            data = {
+                'bridge_reason': reason,
+                'bridge_autonomy_enabled': autonomy_enabled,
+                'software_estop': software_estop,
+                'bridge_mode_allowed': mode_allowed,
+                'bridge_command_fresh': command_fresh,
+                'bridge_output_authorized': output_authorized,
+                'bridge_input_age_s': input_age,
+
+                'bridge_connected': connected,
+                'bridge_armed': armed,
+                'bridge_mode': mode,
+                'bridge_command_zero': command_zero,
+                'bridge_input_linear_x': input_linear,
+                'bridge_input_angular_z': input_yaw,
+
+                'hold_required': bool(
+                    self.hold_required
+                ),
+                'last_stop_reason': self.last_stop_reason,
+
+                'intergate_hold_active': bool(
+                    self.intergate_hold_active
+                ),
+                'intergate_resume_requested': bool(
+                    self.intergate_resume_requested
+                ),
+
+                'operator_requested': bool(
+                    self.operator_requested
+                ),
+                'operator_active': bool(
+                    self.operator_active
+                ),
+                'operator_session_owned': bool(
+                    self.operator_session_owned
+                ),
+                'operator_deadman': bool(
+                    self.operator_deadman
+                ),
+                'operator_deadman_fresh': bool(
+                    self.operator_deadman_is_fresh()
+                ),
+
+                'battery_safety_status': str(
+                    self.battery_safety_status
+                ),
+            }
+
+            msg = String()
+            msg.data = json.dumps(
+                data,
+                separators=(',', ':'),
+            )
+
+            self.control_diagnostics_pub.publish(msg)
+
+        except Exception as exc:
+            # Diagnostics must never alter propulsion behavior.
+            self.get_logger().warning(
+                f'Control diagnostics publish failed: {exc}'
+            )
+
+    def publish_software_stop_state(self):
+        msg = Bool()
+
+        msg.data = bool(
+            self.get_parameter(
+                'software_estop'
+            ).value
+        )
+
+        self.software_stop_pub.publish(msg)
+
     def estop_callback(
         self,
         request,
@@ -1229,6 +1723,8 @@ class MavrosCommandBridge(Node):
 
         self.autonomy_enable_time = None
         self.clear_stored_command()
+
+        self.publish_software_stop_state()
 
         if active:
             # Overwrite any previously accepted GUIDED velocity before
@@ -1297,21 +1793,8 @@ class MavrosCommandBridge(Node):
 
             return response
 
-        if bool(
-            self.get_parameter(
-                'software_estop'
-            ).value
-        ):
-            self.set_autonomy(False)
-
-            response.success = False
-            response.message = (
-                'Cannot enable autonomy while '
-                'software stop is active'
-            )
-
-            return response
-
+        # Operator authority always wins over an autonomy-enable
+        # request.
         if (
             self.operator_requested
             or self.operator_active
@@ -1331,17 +1814,17 @@ class MavrosCommandBridge(Node):
 
             return response
 
-        battery_ok, battery_reason = (
-            self.battery_propulsion_allowed()
-        )
-
-        if not battery_ok:
+        if bool(
+            self.get_parameter(
+                'software_estop'
+            ).value
+        ):
             self.set_autonomy(False)
 
             response.success = False
             response.message = (
-                'Cannot enable autonomy: '
-                + battery_reason
+                'Cannot enable autonomy while '
+                'software stop is active'
             )
 
             return response
@@ -1371,16 +1854,14 @@ class MavrosCommandBridge(Node):
             response.message = (
                 'Cannot enable autonomy: '
                 f'vehicle mode {state.mode} '
-                'is not allowed'
+                'is not GUIDED'
             )
 
             return response
 
-        # IMPORTANT:
-        # Arming is deliberately NOT required here.
-        #
-        # We want the current autonomous setpoint streaming
-        # before the operator arms the vehicle.
+        # Gate detection is intentionally NOT a prerequisite.
+        # A zero follower command is also valid. The bridge can
+        # remain enabled while waiting for perception.
         self.clear_stored_command()
 
         self.set_autonomy(True)
@@ -1396,15 +1877,16 @@ class MavrosCommandBridge(Node):
 
         if state.armed:
             response.message = (
-                'Autonomy enabled and vehicle ARMED'
+                'Autonomy enabled; vehicle ARMED'
             )
         else:
             response.message = (
-                'Autonomy prepared while DISARMED; '
-                'waiting for fresh non-zero command'
+                'Autonomy enabled while DISARMED; '
+                'waiting for controller commands'
             )
 
         return response
+
 
     def command_is_zero(
         self,
@@ -1437,7 +1919,13 @@ class MavrosCommandBridge(Node):
         )
 
     def update(self):
-        self.evaluate_battery_safety()
+        # Battery telemetry remains informational/warning-only.
+        # It no longer owns propulsion authority.
+        self.publish_software_stop_state()
+
+        # Read-only 20 Hz diagnostic snapshot. This must never
+        # participate in authority decisions or propulsion output.
+        self.publish_control_diagnostics()
 
         # HOLD retries always win, including after a
         # low-voltage latch.
@@ -1492,18 +1980,6 @@ class MavrosCommandBridge(Node):
                 )
                 return
 
-            battery_ok, battery_reason = (
-                self.battery_propulsion_allowed()
-            )
-
-            if not battery_ok:
-                self.operator_stop_to_hold(
-                    'battery inhibit: '
-                    + battery_reason,
-                    require_release=True
-                )
-                return
-
             state = self.vehicle_state
 
             if (
@@ -1530,21 +2006,8 @@ class MavrosCommandBridge(Node):
                 self.operator_active = False
                 self.publish_manual_neutral()
 
-                acceptable_transition_modes = set(
-                    self.allowed_modes
-                )
-
-                acceptable_transition_modes.add(
-                    self.stop_mode
-                )
-
-                if mode not in acceptable_transition_modes:
-                    self.operator_stop_to_hold(
-                        f'unexpected mode during takeover: {mode}',
-                        require_release=True
-                    )
-                    return
-
+                # LB takeover may request MANUAL from any
+                # current ArduRover mode.
                 self.request_operator_mode()
                 return
 
@@ -1595,9 +2058,6 @@ class MavrosCommandBridge(Node):
         # NON-OPERATOR SAFETY
         # ====================================================
 
-        if self.low_voltage_is_latched():
-            return
-
         if bool(
             self.get_parameter(
                 'software_estop'
@@ -1638,6 +2098,67 @@ class MavrosCommandBridge(Node):
         mode = str(
             state.mode
         ).upper()
+
+        # ====================================================
+        # INTENTIONAL INTER-GATE HOLD
+        # ====================================================
+
+        if self.intergate_hold_active:
+            # Never allow an old GUIDED velocity to remain active
+            # while transitioning into or sitting in HOLD.
+            self.publish_velocity_neutral()
+
+            if mode == self.stop_mode:
+                # This is the expected inter-gate state.
+                # Keep autonomy authorization but do nothing.
+                return
+
+            if mode not in self.allowed_modes:
+                self.trip_to_hold(
+                    'unexpected mode during inter-gate HOLD: '
+                    f'{state.mode}'
+                )
+                return
+
+            # Still in GUIDED: keep requesting HOLD until confirmed.
+            self.request_hold(
+                'waiting for Gate 2'
+            )
+            return
+
+        # ====================================================
+        # INTER-GATE RESUME TO GUIDED
+        # ====================================================
+
+        if self.intergate_resume_requested:
+            # HOLD must remain neutral until GUIDED is actually confirmed.
+            self.publish_velocity_neutral()
+
+            if mode in self.allowed_modes:
+                self.intergate_resume_requested = False
+
+                # Give the follower a fresh-command grace period after
+                # returning from HOLD.
+                self.autonomy_enable_time = (
+                    self.get_clock().now()
+                )
+
+                self.get_logger().warning(
+                    'INTER-GATE RESUME COMPLETE: '
+                    f'{state.mode} confirmed'
+                )
+
+                return
+
+            if mode != self.stop_mode:
+                self.trip_to_hold(
+                    'unexpected mode during inter-gate resume: '
+                    f'{state.mode}'
+                )
+                return
+
+            self.request_autonomy_mode()
+            return
 
         if mode not in self.allowed_modes:
             self.trip_to_hold(

@@ -26,6 +26,7 @@ setup(
     entry_points={
         'console_scripts': [
             'bridge = boat_dashboard_bridge.bridge:main',
+            'mission_logger = boat_dashboard_bridge.mission_logger:main',
         ],
     },
 )

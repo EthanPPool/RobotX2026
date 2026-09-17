@@ -3,6 +3,14 @@ mavros_command_bridge:
     input_topic: "/control/cmd_vel"
     output_topic: "/mavros/setpoint_velocity/cmd_vel"
     state_topic: "/mavros/state"
+    mission_state_topic: "/mission/state"
+
+    operator_input_topic: "/operator/cmd_vel"
+    manual_control_topic: "/mavros/manual_control/send"
+    operator_mode: "MANUAL"
+    operator_timeout: 0.30
+    operator_manual_axis_max: 500.0
+    operator_mode_retry_period: 0.25
 
     set_mode_service: "/mavros/set_mode"
     stop_mode: "HOLD"
@@ -15,7 +23,6 @@ mavros_command_bridge:
     deadman_timeout: 0.25
     initial_command_timeout: 0.75
     publish_rate: 20.0
-    operator_manual_axis_max: 100.0
 
     max_forward_speed: 0.15
     max_yaw_rate: 0.15
@@ -36,8 +43,9 @@ mavros_command_bridge:
     battery_critical_voltage: 13.2
     battery_critical_duration: 1.0
 
-    # Missing battery telemetry also inhibits propulsion.
+    # Battery telemetry is warning/status only.
+    # It does not veto propulsion authority.
     battery_timeout: 3.0
-    battery_required_for_propulsion: true
+    battery_required_for_propulsion: false
 
     low_voltage_latched: false

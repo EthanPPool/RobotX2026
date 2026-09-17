@@ -38,7 +38,6 @@ def generate_launch_description():
     start_vehicle = LaunchConfiguration('start_vehicle')
     start_mavros = LaunchConfiguration('start_mavros')
 
-    autonomy_enabled = LaunchConfiguration('autonomy_enabled')
     fcu_url = LaunchConfiguration('fcu_url')
 
     arguments = [
@@ -77,15 +76,6 @@ def generate_launch_description():
             'start_mavros',
             default_value='true',
             description='Start MAVROS from boat_vehicle.',
-        ),
-
-        DeclareLaunchArgument(
-            'autonomy_enabled',
-            default_value='false',
-            description=(
-                'Final propulsion-command safety gate. '
-                'Default FALSE for bench testing.'
-            ),
         ),
 
         DeclareLaunchArgument(
@@ -155,7 +145,6 @@ def generate_launch_description():
         condition=IfCondition(start_vehicle),
         launch_arguments={
             'start_mavros': start_mavros,
-            'autonomy_enabled': autonomy_enabled,
             'fcu_url': fcu_url,
         }.items(),
     )
@@ -165,9 +154,7 @@ def generate_launch_description():
             '\n'
             '============================================================\n'
             ' RobotX Task 1 autonomy stack starting\n'
-            ' autonomy_enabled = ',
-            autonomy_enabled,
-            '\n'
+            ' Bridge parameters loaded from bridge.yaml.\n'
             ' FCU = ',
             fcu_url,
             '\n'

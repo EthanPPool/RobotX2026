@@ -16,6 +16,7 @@ from std_msgs.msg import Bool, String
 from std_srvs.srv import SetBool, Trigger
 
 from boat_interfaces.msg import DetectedObjectArray, Gate
+from boat_interfaces.srv import ResetMissionLog
 
 
 class BoatDashboardBridge(Node):
@@ -39,6 +40,7 @@ class BoatDashboardBridge(Node):
         self.battery_last_rx = None
         self.gate_last_rx = None
         self.bridge_last_rx = None
+        self.logger_last_rx = None
 
         # Browser/Xbox operator input. Input arrives from
         # Beeptop over TCP and is republished locally on ROS.
@@ -80,6 +82,17 @@ class BoatDashboardBridge(Node):
 
             "bridge_forward": 0.0,
             "bridge_yaw": 0.0,
+
+            "log_state": "UNAVAILABLE",
+            "log_pending": False,
+            "log_recording": False,
+            "log_mission_id": None,
+            "log_label": "",
+            "log_file_path": None,
+            "log_row_count": 0,
+            "log_buffer_rows": 0,
+            "log_last_end_reason": None,
+            "log_last_error": None,
         }
 
         # MAVROS telemetry
@@ -154,6 +167,13 @@ class BoatDashboardBridge(Node):
             10,
         )
 
+        self.create_subscription(
+            String,
+            "/mission_logger/status",
+            self.logger_status_callback,
+            10,
+        )
+
         # Local control services. These are intentionally
         # executed on the Jetson so safety transactions do not
         # depend on the ground-station TCP link remaining alive.
@@ -182,6 +202,11 @@ class BoatDashboardBridge(Node):
             "/control/reset_mission",
         )
 
+        self.logger_reset_client = self.create_client(
+            ResetMissionLog,
+            "/mission_logger/reset",
+        )
+
         self.operator_pub = self.create_publisher(
             TwistStamped,
             "/operator/cmd_vel",
@@ -202,11 +227,17 @@ class BoatDashboardBridge(Node):
             self.publish_operator_command,
         )
 
-        # 5 Hz output to ground station
-        self.create_timer(
-            0.2,
-            self.publish_telemetry,
+        # 5 Hz output to ground station.
+        #
+        # Keep this independent of the ROS executor so heavy
+        # MAVROS/perception callback traffic cannot starve the
+        # Beeptop telemetry stream.
+        self.telemetry_thread = threading.Thread(
+            target=self.telemetry_loop,
+            daemon=True,
+            name="dashboard-telemetry",
         )
+        self.telemetry_thread.start()
 
         self.server_thread = threading.Thread(
             target=self.server_loop,
@@ -363,6 +394,35 @@ class BoatDashboardBridge(Node):
             self.telemetry["bridge_yaw"] = float(
                 msg.twist.angular.z
             )
+
+    def logger_status_callback(self, msg):
+        try:
+            status = json.loads(msg.data)
+        except (TypeError, json.JSONDecodeError):
+            return
+
+        if not isinstance(status, dict):
+            return
+
+        mapping = {
+            "state": "log_state",
+            "pending": "log_pending",
+            "recording": "log_recording",
+            "mission_id": "log_mission_id",
+            "label": "log_label",
+            "file_path": "log_file_path",
+            "row_count": "log_row_count",
+            "buffer_rows": "log_buffer_rows",
+            "last_end_reason": "log_last_end_reason",
+            "last_error": "log_last_error",
+        }
+
+        with self.lock:
+            self.logger_last_rx = time.monotonic()
+
+            for source, destination in mapping.items():
+                if source in status:
+                    self.telemetry[destination] = status[source]
 
     # ========================================================
     # LOCAL STATUS / SERVICE HELPERS
@@ -618,6 +678,64 @@ class BoatDashboardBridge(Node):
         return (
             bool(response.success),
             str(response.message),
+        )
+
+    def call_logger_reset_service(
+        self,
+        label="",
+        timeout=2.0,
+    ):
+        details = {
+            "state": "UNAVAILABLE",
+            "mission_id": 0,
+            "file_path": "",
+        }
+
+        if not self.logger_reset_client.wait_for_service(
+            timeout_sec=0.50
+        ):
+            return (
+                False,
+                "Diagnostic logger reset service unavailable",
+                details,
+            )
+
+        request = ResetMissionLog.Request()
+        request.label = str(label or "")
+
+        future = self.logger_reset_client.call_async(
+            request
+        )
+
+        if not self.wait_future(
+            future,
+            timeout,
+        ):
+            return (
+                False,
+                "Diagnostic logger reset timed out",
+                details,
+            )
+
+        response = future.result()
+
+        if response is None:
+            return (
+                False,
+                "Diagnostic logger returned no response",
+                details,
+            )
+
+        details = {
+            "state": str(response.state),
+            "mission_id": int(response.mission_id),
+            "file_path": str(response.file_path),
+        }
+
+        return (
+            bool(response.success),
+            str(response.message),
+            details,
         )
 
     # ========================================================
@@ -1049,7 +1167,7 @@ class BoatDashboardBridge(Node):
                 + arm_msg,
             )
 
-    def execute_reset_mission(self):
+    def execute_reset_mission(self, label=""):
         with self.action_lock:
             stop_ok, stop_msg = (
                 self.execute_stop()
@@ -1059,16 +1177,27 @@ class BoatDashboardBridge(Node):
                 self.call_reset_service()
             )
 
+            (
+                logger_ok,
+                logger_msg,
+                logger_details,
+            ) = self.call_logger_reset_service(
+                label
+            )
+
             if reset_ok:
                 self.control_state = (
                     "MISSION RESET / STOPPED"
                 )
 
             return (
-                stop_ok and reset_ok,
+                stop_ok and reset_ok and logger_ok,
                 stop_msg
                 + " | reset: "
-                + reset_msg,
+                + reset_msg
+                + " | logger: "
+                + logger_msg,
+                logger_details,
             )
 
     # ========================================================
@@ -1315,16 +1444,24 @@ class BoatDashboardBridge(Node):
             message.get("command", "")
         ).strip().lower()
 
+        command_data = message.get("data", {})
+
+        if not isinstance(command_data, dict):
+            command_data = {}
+
         handlers = {
             "stop": self.execute_stop,
             "clear_stop": self.execute_clear_stop,
             "enable": self.execute_enable,
             "arm": self.execute_arm,
             "disarm": self.execute_disarm,
-            "reset_mission": self.execute_reset_mission,
+            "reset_mission": lambda: self.execute_reset_mission(
+                command_data.get("label", "")
+            ),
         }
 
         handler = handlers.get(command)
+        response_extra = {}
 
         if handler is None:
             success = False
@@ -1337,7 +1474,22 @@ class BoatDashboardBridge(Node):
             )
 
             try:
-                success, result_message = handler()
+                result = handler()
+
+                if (
+                    isinstance(result, tuple)
+                    and len(result) == 3
+                ):
+                    (
+                        success,
+                        result_message,
+                        response_extra,
+                    ) = result
+                else:
+                    (
+                        success,
+                        result_message,
+                    ) = result
 
             except Exception as exc:
                 self.get_logger().error(
@@ -1357,6 +1509,9 @@ class BoatDashboardBridge(Node):
             "message": str(result_message),
         }
 
+        if response_extra:
+            response.update(response_extra)
+
         try:
             self.send_to_socket(
                 client,
@@ -1368,6 +1523,29 @@ class BoatDashboardBridge(Node):
     # ========================================================
     # TELEMETRY
     # ========================================================
+
+    def telemetry_loop(self):
+        period = 0.2
+
+        while rclpy.ok():
+            start = time.monotonic()
+
+            try:
+                self.publish_telemetry()
+
+            except Exception as exc:
+                self.get_logger().warn(
+                    f"Telemetry send loop error: {exc}"
+                )
+
+            elapsed = time.monotonic() - start
+
+            time.sleep(
+                max(
+                    0.01,
+                    period - elapsed,
+                )
+            )
 
     def publish_telemetry(self):
         now = time.monotonic()
@@ -1397,6 +1575,12 @@ class BoatDashboardBridge(Node):
                 None
                 if self.state_last_rx is None
                 else now - self.state_last_rx
+            )
+
+            data["logger_age_sec"] = (
+                None
+                if self.logger_last_rx is None
+                else now - self.logger_last_rx
             )
 
         status = self.local_status()
