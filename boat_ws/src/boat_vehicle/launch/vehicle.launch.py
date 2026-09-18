@@ -11,6 +11,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     start_mavros = LaunchConfiguration('start_mavros')
     fcu_url = LaunchConfiguration('fcu_url')
+    gcs_url = LaunchConfiguration('gcs_url')
 
     mavros_share = get_package_share_directory('mavros')
     mavros_pluginlist = os.path.join(mavros_share, 'launch', 'apm_pluginlists.yaml')
@@ -34,7 +35,7 @@ def generate_launch_description():
             overrides,
             {
                 'fcu_url': fcu_url,
-                'gcs_url': '',
+                'gcs_url': gcs_url,
                 'system_id': 255,
                 'component_id': 191,
                 'target_system_id': 1,
@@ -55,6 +56,13 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('start_mavros', default_value='true'),
         DeclareLaunchArgument('fcu_url', default_value='udp://0.0.0.0:14550@'),
+        DeclareLaunchArgument(
+            'gcs_url',
+            default_value=(
+                'udp://0.0.0.0:14551@'
+                '192.168.2.100:14550'
+            ),
+        ),
         mavros_node,
         bridge,
     ])
