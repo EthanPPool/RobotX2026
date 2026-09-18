@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
 
 import math
+import re
+import subprocess
 import threading
 import time
+from pathlib import Path
 
-from flask import Flask, jsonify, Response, request
+from flask import (
+    Flask,
+    jsonify,
+    Response,
+    request,
+    send_file,
+)
 
 import rclpy
 from rclpy.node import Node
@@ -1210,12 +1219,294 @@ HTML = r"""
 
 
         <div class="card">
+            <h2>PoR Technical Readiness</h2>
+
+            <div class="row">
+                <span>Overall</span>
+                <span class="value"
+                      id="rc-por-overall">
+                    NOT READY
+                </span>
+            </div>
+
+            <div class="row">
+                <span>RoboCommand Broker</span>
+                <span class="value"
+                      id="rc-por-broker">
+                    NOT READY
+                </span>
+            </div>
+
+            <div class="row">
+                <span>Course Definition</span>
+                <span class="value"
+                      id="rc-por-course">
+                    NOT READY
+                </span>
+            </div>
+
+            <div class="row">
+                <span>USV Communications</span>
+                <span class="value"
+                      id="rc-por-usv-comms">
+                    NOT READY
+                </span>
+            </div>
+
+            <div class="row">
+                <span>UAV Communications</span>
+                <span class="value"
+                      id="rc-por-uav-comms">
+                    NOT READY
+                </span>
+            </div>
+
+            <div class="row">
+                <span>USV Mission Process</span>
+                <span class="value"
+                      id="rc-por-usv-mission">
+                    STOPPED
+                </span>
+            </div>
+
+            <div class="row">
+                <span>UAV Mission Process</span>
+                <span class="value"
+                      id="rc-por-uav-mission">
+                    STOPPED
+                </span>
+            </div>
+
+            <div class="row">
+                <span>Native UAV Geofence</span>
+                <span class="value"
+                      id="rc-por-geofence">
+                    NOT VERIFIED
+                </span>
+            </div>
+
+            <div
+                class="control-message"
+                id="rc-por-reason">
+                Waiting for readiness data.
+            </div>
+        </div>
+
+
+
+        <div class="card">
+            <h2>RoboCommand Run Control</h2>
+
+            <div class="row">
+                <span>Declaration</span>
+                <span
+                    class="value"
+                    id="rc-control-declaration">
+                    NOT SENT
+                </span>
+            </div>
+
+            <div class="row">
+                <span>Declaration Seq</span>
+                <span
+                    class="value"
+                    id="rc-control-declaration-seq">
+                    --
+                </span>
+            </div>
+
+            <div class="row">
+                <span>USV1 Heartbeat</span>
+                <span
+                    class="value"
+                    id="rc-control-usv">
+                    UNKNOWN
+                </span>
+            </div>
+
+            <div class="row">
+                <span>UAV1 Heartbeat</span>
+                <span
+                    class="value"
+                    id="rc-control-uav">
+                    UNKNOWN
+                </span>
+            </div>
+
+            <div class="row">
+                <span>RunStart</span>
+                <span
+                    class="value"
+                    id="rc-control-runstart">
+                    WAITING
+                </span>
+            </div>
+
+            <div class="row">
+                <span>Sequence Verification</span>
+                <span
+                    class="value"
+                    id="rc-control-seq-check">
+                    WAITING
+                </span>
+            </div>
+
+            <div class="row">
+                <span>Run ID</span>
+                <span
+                    class="value"
+                    id="rc-control-run-id">
+                    --
+                </span>
+            </div>
+
+            <div
+                class="control-message"
+                id="rc-control-guidance">
+                Waiting for run state.
+            </div>
+
+            <div class="control-message">
+                Vehicle AUTO status comes from the real
+                vehicle autonomy state. This panel does
+                not arm, change mode, or enable autonomy.
+            </div>
+        </div>
+
+
+        <div class="card">
+            <h2>Official Communications PoR Log</h2>
+
+            <div class="row">
+                <span>rc-test Server</span>
+                <span
+                    class="value"
+                    id="rc-evidence-server">
+                    UNKNOWN
+                </span>
+            </div>
+
+            <div class="row">
+                <span>Current Log</span>
+                <span
+                    class="value"
+                    id="rc-evidence-file">
+                    --
+                </span>
+            </div>
+
+            <div class="row">
+                <span>Declared Vehicles</span>
+                <span
+                    class="value"
+                    id="rc-evidence-vehicles">
+                    --
+                </span>
+            </div>
+
+            <div class="row">
+                <span>RunStart Seen</span>
+                <span
+                    class="value"
+                    id="rc-evidence-runstart">
+                    NO
+                </span>
+            </div>
+
+            <div class="row">
+                <span>Declaration Seq</span>
+                <span
+                    class="value"
+                    id="rc-evidence-declaration-seq">
+                    --
+                </span>
+            </div>
+
+            <div class="row">
+                <span>RunStart Seq</span>
+                <span
+                    class="value"
+                    id="rc-evidence-runstart-seq">
+                    --
+                </span>
+            </div>
+
+            <div class="row">
+                <span>Sequence Match</span>
+                <span
+                    class="value"
+                    id="rc-evidence-sequence">
+                    WAITING
+                </span>
+            </div>
+
+            <div class="row">
+                <span>Run ID</span>
+                <span
+                    class="value"
+                    id="rc-evidence-run-id">
+                    --
+                </span>
+            </div>
+
+            <div class="row">
+                <span>Communications PoR</span>
+                <span
+                    class="value"
+                    id="rc-evidence-result">
+                    INCOMPLETE
+                </span>
+            </div>
+
+            <div
+                class="control-message"
+                id="rc-evidence-message">
+                Waiting for official rc-test evidence.
+            </div>
+
+            <button
+                class="control-button"
+                onclick="rcViewOfficialLog()">
+                VIEW LOG
+            </button>
+
+            <button
+                class="control-button enable-button"
+                id="rc-download-log-button"
+                onclick="rcDownloadOfficialLog()">
+                DOWNLOAD OFFICIAL LOG
+            </button>
+
+            <button
+                class="control-button reset-button"
+                onclick="rcStartNewPorTest()">
+                START NEW PoR TEST
+            </button>
+
+            <pre
+                id="rc-official-log-view"
+                style="
+                    display:none;
+                    max-height:500px;
+                    overflow:auto;
+                    white-space:pre-wrap;
+                    margin-top:12px;
+                    background:#0b1016;
+                    padding:12px;
+                    border-radius:6px;
+                ">
+            </pre>
+        </div>
+
+
+        <div class="card">
             <h2>OCS Actions</h2>
 
             <div class="rc-actions">
 
                 <button
                     class="control-button enable-button"
+                    id="rc-declaration-button"
                     onclick="rcSendDeclaration()">
                     SEND RUN DECLARATION
                 </button>
@@ -3145,6 +3436,7 @@ function makeVehiclePage(id, vehicle) {
 
     let usvCards = "";
     let uavCards = "";
+    let missionProcessCard = "";
 
     if (vehicle.type === "USV") {
 
@@ -4010,6 +4302,71 @@ function makeVehiclePage(id, vehicle) {
     }
 
 
+    if (
+        vehicle.type === "USV"
+        || vehicle.type === "UAV"
+    ) {
+
+        missionProcessCard = `
+
+            <div class="card">
+                <h2>Mission Process</h2>
+
+                <div class="row">
+                    <span>Service State</span>
+                    <span
+                        class="value"
+                        id="${id}-mission-process-state">
+                        UNKNOWN
+                    </span>
+                </div>
+
+                <div class="row">
+                    <span>Running</span>
+                    <span
+                        class="value"
+                        id="${id}-mission-process-running">
+                        NO
+                    </span>
+                </div>
+
+                <button
+                    class="control-button enable-button"
+                    id="${id}-mission-start-button"
+                    onclick="missionProcessAction(
+                        '${id}',
+                        'start'
+                    )">
+                    START MISSION PROCESS
+                </button>
+
+                <button
+                    class="control-button reset-button"
+                    id="${id}-mission-stop-button"
+                    onclick="missionProcessAction(
+                        '${id}',
+                        'stop'
+                    )">
+                    STOP MISSION PROCESS
+                </button>
+
+                <div
+                    class="control-message"
+                    id="${id}-mission-process-message">
+                    Mission process control ready.
+                </div>
+
+                <div class="control-message">
+                    Starting the process does not arm the
+                    vehicle, change flight mode, clear a
+                    software stop, or enable autonomy.
+                </div>
+
+            </div>
+        `;
+    }
+
+
     page.innerHTML = `
         <div class="vehicle-subtabs">
 
@@ -4163,6 +4520,7 @@ function makeVehiclePage(id, vehicle) {
             </div>
 
 
+            ${missionProcessCard}
             ${usvCards}
             ${uavCards}
 
@@ -4301,7 +4659,15 @@ function makeVehiclePage(id, vehicle) {
 
     vehiclePages[id] = true;
 
-    installTabHandlers();
+    refreshPorEvidence();
+
+setInterval(
+    refreshPorEvidence,
+    1000
+);
+
+
+installTabHandlers();
 }
 
 
@@ -5293,6 +5659,67 @@ function updateVehicle(id, vehicle) {
     }
 
 
+    const missionState =
+        String(
+            vehicle.mission_process_state
+            ?? "unknown"
+        ).toLowerCase();
+
+    const missionRunning =
+        Boolean(
+            vehicle.mission_process_running
+        );
+
+    setText(
+        `${id}-mission-process-state`,
+        missionState.toUpperCase()
+    );
+
+    setText(
+        `${id}-mission-process-running`,
+        missionRunning
+            ? "YES"
+            : "NO"
+    );
+
+
+    const missionStartButton =
+        document.getElementById(
+            `${id}-mission-start-button`
+        );
+
+    const missionStopButton =
+        document.getElementById(
+            `${id}-mission-stop-button`
+        );
+
+
+    const missionTransportReady =
+        vehicle.type === "USV"
+            ? Boolean(
+                vehicle.jetson_link
+            )
+            : Boolean(
+                vehicle.vehicle_link
+            );
+
+
+    if (missionStartButton) {
+
+        missionStartButton.disabled =
+            !missionTransportReady
+            || missionRunning;
+    }
+
+
+    if (missionStopButton) {
+
+        missionStopButton.disabled =
+            !missionTransportReady
+            || !missionRunning;
+    }
+
+
     if (vehicle.type === "USV") {
 
         setText(
@@ -6055,6 +6482,112 @@ function updateVehicle(id, vehicle) {
 
 
 
+async function missionProcessAction(
+    vehicleId,
+    action
+) {
+
+    const messageBox =
+        document.getElementById(
+            `${vehicleId}-mission-process-message`
+        );
+
+
+    const verb =
+        action === "start"
+            ? "START"
+            : "STOP";
+
+
+    const warning =
+        action === "start"
+            ? (
+                `Start the ${vehicleId.toUpperCase()} `
+                + "mission process?\n\n"
+                + "This will NOT arm the vehicle, "
+                + "change mode, or enable autonomy."
+            )
+            : (
+                `Stop the ${vehicleId.toUpperCase()} `
+                + "mission process?\n\n"
+                + "Stopping also revokes autonomy "
+                + "authorization."
+            );
+
+
+    if (!confirm(warning)) {
+        return;
+    }
+
+
+    if (messageBox) {
+
+        messageBox.textContent =
+            `${verb} request in progress...`;
+    }
+
+
+    try {
+
+        const response =
+            await fetch(
+                `/api/vehicles/${vehicleId}/mission_process`,
+                {
+                    method: "POST",
+                    cache: "no-store",
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+                    body: JSON.stringify({
+                        action: action
+                    })
+                }
+            );
+
+
+        const result =
+            await response.json();
+
+
+        if (messageBox) {
+
+            messageBox.textContent =
+                result.message
+                ?? "No response message.";
+        }
+
+
+        if (
+            typeof refresh
+            === "function"
+        ) {
+
+            await refresh();
+        }
+
+
+        return result;
+
+    } catch (error) {
+
+        if (messageBox) {
+
+            messageBox.textContent =
+                "Mission process request failed: "
+                + error;
+        }
+
+
+        return {
+            success: false,
+            message: String(error)
+        };
+    }
+}
+
+
+
 async function postUsvControl(action, data = null) {
 
     const messageBox =
@@ -6743,6 +7276,672 @@ function rcSetStatus(connected) {
 }
 
 
+function porSet(
+    id,
+    ok,
+    goodText="READY",
+    badText="NOT READY"
+) {
+
+    const element =
+        document.getElementById(id);
+
+    if (!element) {
+        return;
+    }
+
+    element.textContent =
+        ok
+            ? goodText
+            : badText;
+
+    element.className =
+        "value "
+        + (
+            ok
+                ? "connected"
+                : "disconnected"
+        );
+}
+
+
+async function refreshPorReadiness() {
+
+    const reasonElement =
+        document.getElementById(
+            "rc-por-reason"
+        );
+
+    try {
+
+        const [
+            vehiclesResponse,
+            rcResponse,
+            fenceResponse
+        ] = await Promise.all([
+            fetch(
+                "/api/vehicles",
+                {
+                    cache: "no-store"
+                }
+            ),
+            fetch(
+                "/api/robocommand",
+                {
+                    cache: "no-store"
+                }
+            ),
+            fetch(
+                "/api/vehicles/uav/geofence",
+                {
+                    cache: "no-store"
+                }
+            )
+        ]);
+
+
+        const vehicles =
+            await vehiclesResponse.json();
+
+        const rc =
+            await rcResponse.json();
+
+        const fence =
+            await fenceResponse.json();
+
+
+        const boat =
+            vehicles.boat ?? {};
+
+        const uav =
+            vehicles.uav ?? {};
+
+
+        const brokerReady =
+            Boolean(
+                rc.connected
+            );
+
+
+        const courseCorners =
+            Array.isArray(
+                rc.course_corners
+            )
+                ? rc.course_corners
+                : [];
+
+
+        const courseReady =
+            Boolean(
+                rc.course_id
+                && courseCorners.length >= 4
+            );
+
+
+        const usvCommsReady =
+            Boolean(
+                boat.online
+                && boat.jetson_link
+                && boat.mavlink_link
+                && boat.mavros_connected
+                && boat.mavros_state_fresh
+            );
+
+
+        const uavCommsReady =
+            Boolean(
+                uav.online
+                && uav.vehicle_link
+                && uav.mavros_connected
+                && uav.mavros_state_fresh
+            );
+
+
+        const usvMissionReady =
+            Boolean(
+                boat.mission_process_running
+            );
+
+
+        const uavMissionReady =
+            Boolean(
+                uav.mission_process_running
+            );
+
+
+        const zones =
+            Array.isArray(
+                fence.zones
+            )
+                ? fence.zones
+                : [];
+
+
+        const inclusionPolygon =
+            zones.find(
+                zone =>
+                    zone.type
+                        === "inclusion_polygon"
+                    &&
+                    Array.isArray(
+                        zone.points
+                    )
+                    &&
+                    zone.points.length >= 3
+            );
+
+
+        const fenceReady =
+            Boolean(
+                fence.complete
+                && inclusionPolygon
+            );
+
+
+        const checks = [
+            [
+                "RoboCommand broker",
+                brokerReady
+            ],
+            [
+                "course definition",
+                courseReady
+            ],
+            [
+                "USV communications",
+                usvCommsReady
+            ],
+            [
+                "UAV communications",
+                uavCommsReady
+            ],
+            [
+                "USV mission process",
+                usvMissionReady
+            ],
+            [
+                "UAV mission process",
+                uavMissionReady
+            ],
+            [
+                "native UAV geofence",
+                fenceReady
+            ]
+        ];
+
+
+        const prerequisitesReady =
+            checks.every(
+                item => item[1]
+            );
+
+        const runState =
+            String(
+                rc.run_state
+                ?? "WAITING"
+            ).toUpperCase();
+
+        const reports =
+            rc.vehicle_reports
+            ?? {};
+
+        const usvReport =
+            reports.USV1
+            ?? {};
+
+        const uavReport =
+            reports.UAV1
+            ?? {};
+
+
+        porSet(
+            "rc-por-broker",
+            brokerReady
+        );
+
+        porSet(
+            "rc-por-course",
+            courseReady
+        );
+
+        porSet(
+            "rc-por-usv-comms",
+            usvCommsReady
+        );
+
+        porSet(
+            "rc-por-uav-comms",
+            uavCommsReady
+        );
+
+        porSet(
+            "rc-por-usv-mission",
+            usvMissionReady,
+            "RUNNING",
+            "STOPPED"
+        );
+
+        porSet(
+            "rc-por-uav-mission",
+            uavMissionReady,
+            "RUNNING",
+            "STOPPED"
+        );
+
+        porSet(
+            "rc-por-geofence",
+            fenceReady,
+            "VERIFIED",
+            "NOT VERIFIED"
+        );
+
+        const overall =
+            document.getElementById(
+                "rc-por-overall"
+            );
+
+        if (overall) {
+
+            if (
+                runState === "STARTED"
+                && rc.run_start_validated
+            ) {
+
+                overall.textContent =
+                    "RUNSTART VERIFIED";
+
+                overall.className =
+                    "value connected";
+
+            } else if (
+                runState === "DECLARED"
+            ) {
+
+                overall.textContent =
+                    "DECLARED — WAITING FOR AUTO";
+
+                overall.className =
+                    "value connected";
+
+            } else if (
+                prerequisitesReady
+            ) {
+
+                overall.textContent =
+                    "READY TO DECLARE";
+
+                overall.className =
+                    "value connected";
+
+            } else {
+
+                overall.textContent =
+                    "NOT READY";
+
+                overall.className =
+                    "value disconnected";
+            }
+        }
+
+
+        const declarationButton =
+            document.getElementById(
+                "rc-declaration-button"
+            );
+
+
+        if (declarationButton) {
+
+            declarationButton.disabled =
+                !prerequisitesReady
+                || runState !== "WAITING";
+        }
+
+
+        const failed =
+            checks
+            .filter(
+                item => !item[1]
+            )
+            .map(
+                item => item[0]
+            );
+
+
+        if (reasonElement) {
+
+            if (
+                runState === "STARTED"
+                && rc.run_start_validated
+            ) {
+
+                reasonElement.textContent =
+                    "RunStart verified. "
+                    + `Run ID ${rc.run_id}.`;
+
+            } else if (
+                runState === "DECLARED"
+            ) {
+
+                const autoWaiting = [];
+
+                if (
+                    String(
+                        usvReport.state
+                        ?? ""
+                    ).toUpperCase()
+                    !== "AUTO"
+                ) {
+                    autoWaiting.push("USV1 AUTO");
+                }
+
+                if (
+                    String(
+                        uavReport.state
+                        ?? ""
+                    ).toUpperCase()
+                    !== "AUTO"
+                ) {
+                    autoWaiting.push("UAV1 AUTO");
+                }
+
+                reasonElement.textContent =
+                    autoWaiting.length
+                        ? (
+                            "Declaration sent. Waiting for: "
+                            + autoWaiting.join(", ")
+                        )
+                        : (
+                            "Both vehicles report AUTO. "
+                            + "Waiting for RunStart."
+                        );
+
+            } else {
+
+                reasonElement.textContent =
+                    prerequisitesReady
+                        ? (
+                            "All local technical prerequisites "
+                            + "are satisfied. Run Declaration "
+                            + "is enabled."
+                        )
+                        : (
+                            "Waiting for: "
+                            + failed.join(", ")
+                        );
+            }
+        }
+
+
+    } catch (error) {
+
+        porSet(
+            "rc-por-overall",
+            false,
+            "READY TO DECLARE",
+            "READINESS ERROR"
+        );
+
+
+        if (reasonElement) {
+
+            reasonElement.textContent =
+                "Readiness check failed: "
+                + error;
+        }
+    }
+}
+
+
+
+
+function rcRunValue(
+    id,
+    text,
+    good=null
+) {
+
+    const element =
+        document.getElementById(id);
+
+    if (!element) {
+        return;
+    }
+
+    element.textContent = text;
+
+    if (good === true) {
+        element.className =
+            "value connected";
+    } else if (good === false) {
+        element.className =
+            "value disconnected";
+    } else {
+        element.className =
+            "value";
+    }
+}
+
+
+function updateRcRunControl(rc) {
+
+    const runState =
+        String(
+            rc.run_state
+            ?? "WAITING"
+        ).toUpperCase();
+
+    const reports =
+        rc.vehicle_reports
+        ?? {};
+
+    const usv =
+        reports.USV1
+        ?? {};
+
+    const uav =
+        reports.UAV1
+        ?? {};
+
+    const usvState =
+        String(
+            usv.state
+            ?? "UNKNOWN"
+        ).toUpperCase();
+
+    const uavState =
+        String(
+            uav.state
+            ?? "UNKNOWN"
+        ).toUpperCase();
+
+    const declarationSent =
+        rc.declaration_seq !== null
+        && rc.declaration_seq !== undefined;
+
+    const runStartValidated =
+        Boolean(
+            rc.run_start_validated
+        );
+
+    const validationMessage =
+        String(
+            rc.run_start_validation_message
+            ?? ""
+        );
+
+    const runStartRejected =
+        validationMessage
+            .toLowerCase()
+            .includes("rejected");
+
+
+    rcRunValue(
+        "rc-control-declaration",
+        declarationSent
+            ? "SENT"
+            : "NOT SENT",
+        declarationSent
+            ? true
+            : null
+    );
+
+    rcRunValue(
+        "rc-control-declaration-seq",
+        declarationSent
+            ? String(rc.declaration_seq)
+            : "--"
+    );
+
+    rcRunValue(
+        "rc-control-usv",
+        usvState,
+        usvState === "AUTO"
+            ? true
+            : (
+                usvState === "KILLED"
+                    ? false
+                    : null
+            )
+    );
+
+    rcRunValue(
+        "rc-control-uav",
+        uavState,
+        uavState === "AUTO"
+            ? true
+            : (
+                uavState === "KILLED"
+                    ? false
+                    : null
+            )
+    );
+
+    if (runStartValidated) {
+
+        rcRunValue(
+            "rc-control-runstart",
+            "VERIFIED",
+            true
+        );
+
+        rcRunValue(
+            "rc-control-seq-check",
+            "PASS",
+            true
+        );
+
+    } else if (runStartRejected) {
+
+        rcRunValue(
+            "rc-control-runstart",
+            "REJECTED",
+            false
+        );
+
+        rcRunValue(
+            "rc-control-seq-check",
+            "FAIL",
+            false
+        );
+
+    } else {
+
+        rcRunValue(
+            "rc-control-runstart",
+            "WAITING",
+            null
+        );
+
+        rcRunValue(
+            "rc-control-seq-check",
+            "WAITING",
+            null
+        );
+    }
+
+
+    rcRunValue(
+        "rc-control-run-id",
+        rc.run_id
+            ?? "--"
+    );
+
+
+    const guidance =
+        document.getElementById(
+            "rc-control-guidance"
+        );
+
+
+    if (guidance) {
+
+        if (
+            runState === "STARTED"
+            && runStartValidated
+        ) {
+
+            guidance.textContent =
+                "RunStart verified. "
+                + `Declaration seq ${rc.declaration_seq} `
+                + `matches. Run ID ${rc.run_id}.`;
+
+        } else if (runStartRejected) {
+
+            guidance.textContent =
+                validationMessage;
+
+        } else if (runState === "DECLARED") {
+
+            const waiting = [];
+
+            if (usvState !== "AUTO") {
+                waiting.push("USV1 AUTO");
+            }
+
+            if (uavState !== "AUTO") {
+                waiting.push("UAV1 AUTO");
+            }
+
+            if (waiting.length > 0) {
+
+                guidance.textContent =
+                    "Declaration accepted locally. "
+                    + "Waiting for: "
+                    + waiting.join(", ")
+                    + ".";
+
+            } else {
+
+                guidance.textContent =
+                    "Both declared vehicles report AUTO. "
+                    + "Waiting for RoboCommand RunStart.";
+            }
+
+        } else {
+
+            guidance.textContent =
+                "Ready for a RunDeclaration when "
+                + "all declaration prerequisites pass.";
+        }
+    }
+
+
+    const declarationButton =
+        document.getElementById(
+            "rc-declaration-button"
+        );
+
+    if (
+        declarationButton
+        && runState !== "WAITING"
+    ) {
+        declarationButton.disabled = true;
+    }
+}
+
+
+
 async function refreshRoboCommand() {
 
     try {
@@ -6757,6 +7956,8 @@ async function refreshRoboCommand() {
 
         const rc =
             await response.json();
+
+        updateRcRunControl(rc);
 
         rcSetStatus(
             Boolean(rc.connected)
@@ -6879,6 +8080,347 @@ async function refreshRoboCommand() {
 }
 
 
+
+function rcEvidenceValue(
+    id,
+    text,
+    status=null
+) {
+
+    const element =
+        document.getElementById(id);
+
+    if (!element) {
+        return;
+    }
+
+    element.textContent =
+        text ?? "--";
+
+    if (status === true) {
+
+        element.className =
+            "value connected";
+
+    } else if (status === false) {
+
+        element.className =
+            "value disconnected";
+
+    } else {
+
+        element.className =
+            "value";
+    }
+}
+
+
+async function refreshPorEvidence() {
+
+    try {
+
+        const response =
+            await fetch(
+                "/api/robocommand/por/evidence",
+                {
+                    cache: "no-store"
+                }
+            );
+
+        const evidence =
+            await response.json();
+
+
+        rcEvidenceValue(
+            "rc-evidence-server",
+            evidence.test_server_running
+                ? "RUNNING"
+                : "STOPPED",
+            Boolean(
+                evidence.test_server_running
+            )
+        );
+
+
+        rcEvidenceValue(
+            "rc-evidence-file",
+            evidence.log_name
+                ?? "--"
+        );
+
+
+        const vehicles =
+            Array.isArray(
+                evidence.declared_vehicles
+            )
+                ? evidence.declared_vehicles
+                : [];
+
+
+        rcEvidenceValue(
+            "rc-evidence-vehicles",
+            vehicles.length
+                ? vehicles.join(", ")
+                : "--",
+            vehicles.length >= 2
+                ? true
+                : null
+        );
+
+
+        rcEvidenceValue(
+            "rc-evidence-runstart",
+            evidence.run_start_seen
+                ? "YES"
+                : "NO",
+            evidence.run_start_seen
+                ? true
+                : null
+        );
+
+
+        rcEvidenceValue(
+            "rc-evidence-declaration-seq",
+            evidence.declaration_seq
+                ?? "--"
+        );
+
+
+        rcEvidenceValue(
+            "rc-evidence-runstart-seq",
+            evidence.run_start_seq
+                ?? "--"
+        );
+
+
+        rcEvidenceValue(
+            "rc-evidence-sequence",
+            evidence.sequence_match
+                ? "PASS"
+                : (
+                    evidence.run_start_seen
+                        ? "FAIL"
+                        : "WAITING"
+                ),
+            evidence.sequence_match
+                ? true
+                : (
+                    evidence.run_start_seen
+                        ? false
+                        : null
+                )
+        );
+
+
+        rcEvidenceValue(
+            "rc-evidence-run-id",
+            evidence.run_id
+                ?? "--"
+        );
+
+
+        rcEvidenceValue(
+            "rc-evidence-result",
+            evidence.pass
+                ? "PASS"
+                : "INCOMPLETE",
+            Boolean(evidence.pass)
+        );
+
+
+        const message =
+            document.getElementById(
+                "rc-evidence-message"
+            );
+
+
+        if (message) {
+
+            message.textContent =
+                evidence.message
+                ?? (
+                    evidence.pass
+                        ? (
+                            "Official rc-test evidence "
+                            + "is ready for submission."
+                        )
+                        : (
+                            "Waiting for complete "
+                            + "run-start evidence."
+                        )
+                );
+        }
+
+
+        const downloadButton =
+            document.getElementById(
+                "rc-download-log-button"
+            );
+
+        if (downloadButton) {
+
+            downloadButton.disabled =
+                !evidence.log_available;
+        }
+
+    } catch (error) {
+
+        rcEvidenceValue(
+            "rc-evidence-result",
+            "ERROR",
+            false
+        );
+
+        const message =
+            document.getElementById(
+                "rc-evidence-message"
+            );
+
+        if (message) {
+            message.textContent =
+                "Evidence status error: "
+                + error;
+        }
+    }
+}
+
+
+async function rcViewOfficialLog() {
+
+    const view =
+        document.getElementById(
+            "rc-official-log-view"
+        );
+
+    if (!view) {
+        return;
+    }
+
+
+    if (
+        view.style.display !== "none"
+    ) {
+
+        view.style.display = "none";
+        return;
+    }
+
+
+    try {
+
+        const response =
+            await fetch(
+                "/api/robocommand/por/log?tail=500",
+                {
+                    cache: "no-store"
+                }
+            );
+
+
+        if (!response.ok) {
+
+            const detail =
+                await response.text();
+
+            view.textContent =
+                detail || "Log unavailable";
+
+        } else {
+
+            view.textContent =
+                await response.text();
+        }
+
+
+        view.style.display = "block";
+
+
+    } catch (error) {
+
+        view.textContent =
+            "Could not load log: "
+            + error;
+
+        view.style.display = "block";
+    }
+}
+
+
+function rcDownloadOfficialLog() {
+
+    window.location.href =
+        "/api/robocommand/por/download";
+}
+
+
+async function rcStartNewPorTest() {
+
+    const proceed =
+        confirm(
+            "Start a new official Communications PoR test?\n\n"
+            + "This restarts only the RoboNation rc-test "
+            + "server and resets the OCS run session.\n\n"
+            + "It does NOT arm either vehicle, disable "
+            + "autonomy, change flight modes, or command motion."
+        );
+
+    if (!proceed) {
+        return;
+    }
+
+
+    const message =
+        document.getElementById(
+            "rc-evidence-message"
+        );
+
+    if (message) {
+        message.textContent =
+            "Starting new official PoR session...";
+    }
+
+
+    try {
+
+        const response =
+            await fetch(
+                "/api/robocommand/por/new_session",
+                {
+                    method: "POST",
+                    cache: "no-store"
+                }
+            );
+
+        const result =
+            await response.json();
+
+
+        if (message) {
+
+            message.textContent =
+                result.message
+                ?? "New session request completed.";
+        }
+
+
+        await refreshRoboCommand();
+        await refreshPorReadiness();
+        await refreshPorEvidence();
+
+
+    } catch (error) {
+
+        if (message) {
+
+            message.textContent =
+                "Could not start new PoR session: "
+                + error;
+        }
+    }
+}
+
+
+
 async function rcPost(path) {
 
     const messageBox =
@@ -6951,6 +8493,13 @@ refreshRoboCommand();
 setInterval(
     refreshRoboCommand,
     500
+);
+
+refreshPorReadiness();
+
+setInterval(
+    refreshPorReadiness,
+    1000
 );
 
 
@@ -8653,7 +10202,23 @@ class RobotXDashboard(Node):
                     data["bridge_alive"] = False
                     data["control_state"] = "---"
                     data["software_stop"] = "---"
-                    data["autonomy_enabled"] = False
+
+                    # UAV autonomy state comes from the
+                    # authoritative vehicle-local
+                    # /vehicle/autonomy_status telemetry.
+                    #
+                    # Do not overwrite it here merely because
+                    # the vehicle is not the USV.
+                    if vehicle_id == "uav":
+                        data["autonomy_enabled"] = bool(
+                            data.get(
+                                "autonomy_enabled",
+                                False,
+                            )
+                        )
+                    else:
+                        data["autonomy_enabled"] = False
+
                     data["can_enable"] = False
                     data["logger_fresh"] = False
 
@@ -8809,6 +10374,609 @@ def api_vehicles():
         dashboard_node.snapshot()
     )
 
+
+
+
+@app.route(
+    "/api/vehicles/<vehicle_id>/mission_process",
+    methods=["GET", "POST"],
+)
+def api_vehicle_mission_process(vehicle_id):
+
+    if dashboard_node is None:
+        return jsonify({
+            "success": False,
+            "message": "Dashboard node unavailable",
+        }), 503
+
+    if vehicle_id not in ("boat", "uav"):
+        return jsonify({
+            "success": False,
+            "message": (
+                "Mission process control is only "
+                "available for boat and uav"
+            ),
+        }), 404
+
+    if request.method == "GET":
+        action = "status"
+    else:
+        data = request.get_json(
+            silent=True
+        ) or {}
+
+        action = str(
+            data.get("action", "status")
+        ).strip().lower()
+
+    if action not in (
+        "start",
+        "stop",
+        "status",
+    ):
+        return jsonify({
+            "success": False,
+            "message": (
+                "action must be start, stop, or status"
+            ),
+        }), 400
+
+    client = (
+        dashboard_node
+        .vehicle_manager
+        .get_client(vehicle_id)
+    )
+
+    if client is None:
+        return jsonify({
+            "success": False,
+            "message": "Vehicle client unavailable",
+        }), 503
+
+    result = client.command(
+        "mission_process",
+        {
+            "action": action,
+        },
+    )
+
+    return jsonify(result)
+
+
+
+RC_TEST_ROOT = Path(
+    "/home/epeop/"
+    "RoboCommand_Official/"
+    "RobotX_2026"
+)
+
+RC_TEST_LOG_DIR = (
+    RC_TEST_ROOT
+    / "logs"
+)
+
+
+def latest_rc_test_log():
+
+    if not RC_TEST_LOG_DIR.exists():
+        return None
+
+    logs = list(
+        RC_TEST_LOG_DIR.glob(
+            "robocommand_*.log"
+        )
+    )
+
+    if not logs:
+        return None
+
+    return max(
+        logs,
+        key=lambda path:
+            path.stat().st_mtime,
+    )
+
+
+def rc_test_server_running():
+
+    if not RC_TEST_ROOT.exists():
+        return False
+
+    try:
+
+        result = subprocess.run(
+            [
+                "/usr/bin/docker",
+                "compose",
+                "ps",
+                "--status",
+                "running",
+                "--services",
+            ],
+            cwd=str(RC_TEST_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=3.0,
+            check=False,
+        )
+
+        if result.returncode != 0:
+            return False
+
+        services = {
+            line.strip()
+            for line
+            in result.stdout.splitlines()
+            if line.strip()
+        }
+
+        return "rc-test" in services
+
+    except Exception:
+        return False
+
+
+def parse_rc_test_evidence(
+    team_id="ULLY",
+):
+
+    path = latest_rc_test_log()
+
+    result = {
+        "test_server_running":
+            rc_test_server_running(),
+        "log_available": False,
+        "log_name": None,
+        "log_size_bytes": None,
+        "declared_vehicles": [],
+        "declaration_seq": None,
+        "run_start_seen": False,
+        "run_start_seq": None,
+        "run_id": None,
+        "sequence_match": False,
+        "pass": False,
+        "message": (
+            "No official rc-test log "
+            "has been found yet."
+        ),
+    }
+
+
+    if path is None:
+        return result
+
+
+    result["log_available"] = True
+    result["log_name"] = path.name
+    result["log_size_bytes"] = (
+        path.stat().st_size
+    )
+
+
+    try:
+        text = path.read_text(
+            errors="replace"
+        )
+
+    except Exception as exc:
+
+        result["message"] = (
+            "Could not read rc-test log: "
+            + str(exc)
+        )
+
+        return result
+
+
+    # --------------------------------------------------------
+    # Find the latest RunDeclaration acknowledged by the
+    # official rc-test server for our team.
+    #
+    # The official server emits:
+    #
+    # [auto-start] Tracking ULLY vehicles [...]
+    # --------------------------------------------------------
+
+    tracking = None
+
+    pattern = re.compile(
+        r"\[auto-start\]\s+Tracking\s+"
+        + re.escape(team_id)
+        + r"\s+vehicles\s+\[(.*?)\]"
+    )
+
+
+    for match in pattern.finditer(text):
+        tracking = match
+
+
+    if tracking is None:
+
+        result["message"] = (
+            "Official log exists, but no "
+            "RunDeclaration for "
+            + team_id
+            + " has been observed yet."
+        )
+
+        return result
+
+
+    vehicle_text = tracking.group(1)
+
+    vehicles = re.findall(
+        r"""['"]([^'"]+)['"]""",
+        vehicle_text,
+    )
+
+    result["declared_vehicles"] = (
+        vehicles
+    )
+
+
+    # The full decoded RxRequest is logged immediately before
+    # the tracking line. Pull the declaration sequence from
+    # that decoded message.
+
+    request_start = text.rfind(
+        "[RxRequest]",
+        0,
+        tracking.start(),
+    )
+
+
+    if request_start >= 0:
+
+        request_block = text[
+            request_start:
+            tracking.start()
+        ]
+
+        if (
+            "run_declaration {" in request_block
+            and
+            f'team_id: "{team_id}"'
+            in request_block
+        ):
+
+            seq_match = re.search(
+                r"(?m)^seq:\s*(\d+)\s*$",
+                request_block,
+            )
+
+            if seq_match:
+
+                result["declaration_seq"] = int(
+                    seq_match.group(1)
+                )
+
+
+    # --------------------------------------------------------
+    # Find RunStart produced after this declaration.
+    #
+    # The official rc-test server emits:
+    #
+    # All declared vehicles autonomous ... publishing
+    # RunStart (declaration_seq=N, run_id=M)
+    # --------------------------------------------------------
+
+    start_pattern = re.compile(
+        r"\[auto-start\]\s+"
+        r"All declared vehicles autonomous for\s+"
+        + re.escape(team_id)
+        + r"[^\n]*"
+        r"publishing RunStart\s+"
+        r"\(declaration_seq=(\d+),\s*"
+        r"run_id=(\d+)\)"
+    )
+
+
+    run_start = start_pattern.search(
+        text,
+        tracking.end(),
+    )
+
+
+    if run_start is not None:
+
+        result["run_start_seen"] = True
+
+        result["run_start_seq"] = int(
+            run_start.group(1)
+        )
+
+        result["run_id"] = int(
+            run_start.group(2)
+        )
+
+
+    result["sequence_match"] = bool(
+        result["declaration_seq"]
+        is not None
+        and
+        result["run_start_seq"]
+        is not None
+        and
+        result["declaration_seq"]
+        == result["run_start_seq"]
+    )
+
+
+    result["pass"] = bool(
+        len(
+            result["declared_vehicles"]
+        ) >= 2
+        and
+        result["run_start_seen"]
+        and
+        result["sequence_match"]
+        and
+        result["run_id"]
+        is not None
+    )
+
+
+    if result["pass"]:
+
+        result["message"] = (
+            "PASS: official rc-test log contains "
+            "a two-vehicle RunDeclaration and "
+            "matching RunStart. "
+            "Download this log for the "
+            "Communications PoR submission."
+        )
+
+    else:
+
+        waiting = []
+
+        if len(
+            result["declared_vehicles"]
+        ) < 2:
+            waiting.append(
+                "RunDeclaration with >=2 vehicles"
+            )
+
+        if not result[
+            "run_start_seen"
+        ]:
+            waiting.append(
+                "RunStart"
+            )
+
+        elif not result[
+            "sequence_match"
+        ]:
+            waiting.append(
+                "matching declaration sequence"
+            )
+
+        result["message"] = (
+            "INCOMPLETE: waiting for "
+            + ", ".join(waiting)
+        )
+
+
+    return result
+
+
+@app.route(
+    "/api/robocommand/por/evidence"
+)
+def api_robocommand_por_evidence():
+
+    return jsonify(
+        parse_rc_test_evidence()
+    )
+
+
+@app.route(
+    "/api/robocommand/por/log"
+)
+def api_robocommand_por_log():
+
+    path = latest_rc_test_log()
+
+    if path is None:
+        return Response(
+            "No official rc-test log found.",
+            status=404,
+            mimetype="text/plain",
+        )
+
+
+    try:
+        requested_tail = int(
+            request.args.get(
+                "tail",
+                "500",
+            )
+        )
+
+    except ValueError:
+        requested_tail = 500
+
+
+    requested_tail = max(
+        1,
+        min(
+            requested_tail,
+            2000,
+        ),
+    )
+
+
+    text = path.read_text(
+        errors="replace"
+    )
+
+    lines = text.splitlines()
+
+    return Response(
+        "\n".join(
+            lines[-requested_tail:]
+        ),
+        mimetype="text/plain",
+    )
+
+
+@app.route(
+    "/api/robocommand/por/download"
+)
+def api_robocommand_por_download():
+
+    path = latest_rc_test_log()
+
+    if path is None:
+        return jsonify({
+            "success": False,
+            "message": (
+                "No official rc-test log found."
+            ),
+        }), 404
+
+
+    return send_file(
+        path,
+        mimetype="text/plain",
+        as_attachment=True,
+        download_name=path.name,
+    )
+
+
+@app.route(
+    "/api/robocommand/por/new_session",
+    methods=["POST"],
+)
+def api_robocommand_por_new_session():
+
+    if dashboard_node is None:
+        return jsonify({
+            "success": False,
+            "message": (
+                "Dashboard node unavailable."
+            ),
+        }), 503
+
+
+    if not RC_TEST_ROOT.exists():
+        return jsonify({
+            "success": False,
+            "message": (
+                "Official RoboCommand test "
+                "installation was not found."
+            ),
+        }), 404
+
+
+    old_log = latest_rc_test_log()
+
+
+    # Reset only local OCS run/session state.
+    #
+    # This does NOT send any vehicle command.
+    reset_result = (
+        dashboard_node
+        .robocommand_client
+        .reset_run_session()
+    )
+
+
+    try:
+
+        restart = subprocess.run(
+            [
+                "/usr/bin/docker",
+                "compose",
+                "restart",
+                "rc-test",
+            ],
+            cwd=str(RC_TEST_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=20.0,
+            check=False,
+        )
+
+    except Exception as exc:
+
+        return jsonify({
+            "success": False,
+            "message": (
+                "Could not restart official "
+                "rc-test server: "
+                + str(exc)
+            ),
+        }), 500
+
+
+    if restart.returncode != 0:
+
+        detail = (
+            restart.stderr.strip()
+            or restart.stdout.strip()
+            or "unknown docker error"
+        )
+
+        return jsonify({
+            "success": False,
+            "message": (
+                "rc-test restart failed: "
+                + detail
+            ),
+        }), 500
+
+
+    # Give rc-test a moment to create its new timestamped log.
+
+    deadline = (
+        time.monotonic()
+        + 8.0
+    )
+
+    new_log = None
+
+    while (
+        time.monotonic()
+        < deadline
+    ):
+
+        candidate = (
+            latest_rc_test_log()
+        )
+
+        if (
+            candidate is not None
+            and candidate != old_log
+        ):
+            new_log = candidate
+            break
+
+        time.sleep(0.25)
+
+
+    return jsonify({
+        "success": True,
+        "message": (
+            "New official Communications PoR "
+            "session started. "
+            "Vehicle autonomy, modes and arming "
+            "were not changed. "
+            "Send one new Run Declaration "
+            "from the RoboCommand page."
+        ),
+        "new_log": (
+            None
+            if new_log is None
+            else new_log.name
+        ),
+        "ocs_reset": bool(
+            reset_result.get(
+                "success",
+                False,
+            )
+        ),
+    })
 
 
 @app.route("/api/robocommand")

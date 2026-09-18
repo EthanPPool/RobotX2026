@@ -3,6 +3,7 @@
 import json
 import math
 import socket
+import subprocess
 import threading
 import time
 
@@ -29,6 +30,12 @@ class BoatDashboardBridge(Node):
         self.send_lock = threading.RLock()
         self.action_lock = threading.RLock()
         self.client_socket = None
+
+        self.mission_service = (
+            "robotx-usv-autonomy.service"
+        )
+        self.mission_process_state = "unknown"
+        self.mission_process_checked_at = None
 
         self.software_stop_state = "UNKNOWN"
         self.control_state = "BOOT SAFE"
@@ -495,6 +502,134 @@ class BoatDashboardBridge(Node):
             "bridge_alive": bridge_alive,
         }
 
+    def mission_process_status(self, force=False):
+        now = time.monotonic()
+
+        with self.lock:
+            if (
+                not force
+                and self.mission_process_checked_at
+                is not None
+                and (
+                    now
+                    - self.mission_process_checked_at
+                ) < 1.0
+            ):
+                return self.mission_process_state
+
+        try:
+            result = subprocess.run(
+                [
+                    "/usr/bin/systemctl",
+                    "is-active",
+                    self.mission_service,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+                check=False,
+            )
+
+            state = (
+                result.stdout.strip()
+                or "unknown"
+            )
+
+        except Exception as exc:
+            self.get_logger().warn(
+                "Mission service status failed: "
+                + str(exc)
+            )
+            state = "unknown"
+
+        with self.lock:
+            self.mission_process_state = state
+            self.mission_process_checked_at = now
+
+        return state
+
+
+    def execute_mission_process(self, action):
+        action = str(
+            action or "status"
+        ).strip().lower()
+
+        if action == "status":
+            state = self.mission_process_status(
+                force=True
+            )
+
+            return (
+                True,
+                f"Mission process is {state}",
+            )
+
+        if action not in ("start", "stop"):
+            return (
+                False,
+                "mission_process action must be "
+                "start, stop, or status",
+            )
+
+        # STOP also revokes autonomous authority.
+        # START intentionally does NOT enable autonomy,
+        # clear software stop, arm, or change mode.
+        if action == "stop":
+            self.call_bool_service(
+                self.autonomy_client,
+                False,
+            )
+
+        try:
+            result = subprocess.run(
+                [
+                    "sudo",
+                    "-n",
+                    "/usr/bin/systemctl",
+                    action,
+                    self.mission_service,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=8.0,
+                check=False,
+            )
+
+        except Exception as exc:
+            return (
+                False,
+                "Mission process command failed: "
+                + str(exc),
+            )
+
+        state = self.mission_process_status(
+            force=True
+        )
+
+        desired = (
+            "active"
+            if action == "start"
+            else "inactive"
+        )
+
+        success = state == desired
+
+        detail = (
+            result.stderr.strip()
+            or result.stdout.strip()
+        )
+
+        message = (
+            f"Mission process {action}: "
+            f"{state}"
+        )
+
+        if detail and not success:
+            message += f" ({detail})"
+
+        return success, message
+
+
     def wait_future(self, future, timeout=2.0):
         deadline = time.monotonic() + timeout
 
@@ -867,20 +1002,13 @@ class BoatDashboardBridge(Node):
                     "is not connected",
                 )
 
-            if not status["gate_fresh"]:
-                return (
-                    False,
-                    "Enable rejected: no fresh "
-                    "high-confidence gate",
-                )
-
-            if not status["control_ready"]:
-                return (
-                    False,
-                    "Enable rejected: follower "
-                    "is commanding STOP",
-                )
-
+            # Gate perception and follower motion are NOT
+            # prerequisites for entering autonomy.
+            #
+            # The vehicle may enter GUIDED/autonomy while
+            # DISARMED and wait safely for perception.
+            #
+            # Gate visibility is enforced at ARM instead.
             if not status["bridge_alive"]:
                 return (
                     False,
@@ -1110,6 +1238,17 @@ class BoatDashboardBridge(Node):
                     False,
                     "ARM rejected: MAVROS "
                     "is not connected",
+                )
+
+            # Dashboard ARM is the transition that can
+            # actually permit propulsion. Require current,
+            # high-confidence gate perception here rather
+            # than when autonomy is merely enabled.
+            if not status["gate_fresh"]:
+                return (
+                    False,
+                    "ARM rejected: no fresh "
+                    "high-confidence gate visible",
                 )
 
             if status["mode"] == "GUIDED":
@@ -1458,6 +1597,9 @@ class BoatDashboardBridge(Node):
             "reset_mission": lambda: self.execute_reset_mission(
                 command_data.get("label", "")
             ),
+            "mission_process": lambda: self.execute_mission_process(
+                command_data.get("action", "status")
+            ),
         }
 
         handler = handlers.get(command)
@@ -1584,6 +1726,18 @@ class BoatDashboardBridge(Node):
             )
 
         status = self.local_status()
+
+        mission_process_state = (
+            self.mission_process_status()
+        )
+
+        data["mission_process_state"] = (
+            mission_process_state
+        )
+
+        data["mission_process_running"] = (
+            mission_process_state == "active"
+        )
 
         data["bridge_alive"] = status["bridge_alive"]
         data["control_ready"] = status["control_ready"]
