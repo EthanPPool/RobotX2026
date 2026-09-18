@@ -143,33 +143,40 @@ class MavrosCommandBridge(Node):
 
         if not self.have_state:
             response.success = False
-            response.message = 'Cannot enable autonomy: no MAVROS state received.'
+            response.message = (
+                'Cannot enable autonomy: '
+                'no MAVROS state received.'
+            )
             return response
+
         if not self.state.connected:
             response.success = False
-            response.message = 'Cannot enable autonomy: MAVROS is disconnected.'
-            return response
-        if not self.state.armed:
-            response.success = False
-            response.message = 'Cannot enable autonomy: vehicle is not armed.'
-            return response
-        if str(self.state.mode).upper() not in self.allowed_modes:
-            response.success = False
             response.message = (
-                f'Cannot enable autonomy: mode {self.state.mode!r} is not in '
-                f'{self.allowed_modes}.')
+                'Cannot enable autonomy: '
+                'MAVROS is disconnected.'
+            )
             return response
 
-        safety_ok, safety_reason = self._safety_ok()
-        if not safety_ok:
-            response.success = False
-            response.message = f'Cannot enable autonomy: {safety_reason}.'
-            return response
-
+        # Autonomy enable represents operator intent only.
+        #
+        # It intentionally does NOT require:
+        #   - armed=true
+        #   - an allowed autonomous flight mode
+        #   - pre-arm readiness
+        #
+        # Actual velocity-command authorization remains
+        # independently gated by _authorization(), which
+        # still requires armed + allowed mode + safety
+        # readiness + a fresh command stream.
         self.autonomy_enabled = True
+
         response.success = True
         response.message = (
-            'Autonomy enabled; safety supervisor and deadman remain mandatory.')
+            'Autonomy enabled. Vehicle may remain '
+            'DISARMED; pre-arm checks still govern ARM '
+            'and command authorization remains inhibited '
+            'until all flight requirements are satisfied.'
+        )
         self.get_logger().warn(response.message)
         return response
 

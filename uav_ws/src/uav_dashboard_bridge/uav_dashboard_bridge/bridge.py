@@ -3,6 +3,7 @@
 import json
 import math
 import socket
+import subprocess
 import threading
 import time
 
@@ -32,6 +33,12 @@ class UavDashboardBridge(Node):
         self.client_lock = threading.RLock()
         self.send_lock = threading.RLock()
         self.action_lock = threading.RLock()
+
+        self.mission_service = (
+            "robotx-uav-autonomy.service"
+        )
+        self.mission_process_state = "unknown"
+        self.mission_process_checked_at = None
 
         self.client_socket = None
 
@@ -651,6 +658,140 @@ class UavDashboardBridge(Node):
             "message": str(response.message),
         }
 
+    def mission_process_status(self, force=False):
+        now = time.monotonic()
+
+        with self.lock:
+            if (
+                not force
+                and self.mission_process_checked_at
+                is not None
+                and (
+                    now
+                    - self.mission_process_checked_at
+                ) < 1.0
+            ):
+                return self.mission_process_state
+
+        try:
+            result = subprocess.run(
+                [
+                    "/usr/bin/systemctl",
+                    "is-active",
+                    self.mission_service,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+                check=False,
+            )
+
+            state = (
+                result.stdout.strip()
+                or "unknown"
+            )
+
+        except Exception as exc:
+            self.get_logger().warn(
+                "Mission service status failed: "
+                + str(exc)
+            )
+            state = "unknown"
+
+        with self.lock:
+            self.mission_process_state = state
+            self.mission_process_checked_at = now
+
+        return state
+
+
+    def execute_mission_process(self, action):
+        action = str(
+            action or "status"
+        ).strip().lower()
+
+        if action == "status":
+            state = self.mission_process_status(
+                force=True
+            )
+
+            return {
+                "success": True,
+                "message": (
+                    f"Mission process is {state}"
+                ),
+            }
+
+        if action not in ("start", "stop"):
+            return {
+                "success": False,
+                "message": (
+                    "mission_process action must be "
+                    "start, stop, or status"
+                ),
+            }
+
+        # STOP revokes autonomous command authority.
+        # START intentionally does NOT arm, change mode,
+        # or enable autonomy.
+        if action == "stop":
+            self.call_set_autonomy(False)
+
+        try:
+            result = subprocess.run(
+                [
+                    "sudo",
+                    "-n",
+                    "/usr/bin/systemctl",
+                    action,
+                    self.mission_service,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=8.0,
+                check=False,
+            )
+
+        except Exception as exc:
+            return {
+                "success": False,
+                "message": (
+                    "Mission process command failed: "
+                    + str(exc)
+                ),
+            }
+
+        state = self.mission_process_status(
+            force=True
+        )
+
+        desired = (
+            "active"
+            if action == "start"
+            else "inactive"
+        )
+
+        success = state == desired
+
+        detail = (
+            result.stderr.strip()
+            or result.stdout.strip()
+        )
+
+        message = (
+            f"Mission process {action}: "
+            f"{state}"
+        )
+
+        if detail and not success:
+            message += f" ({detail})"
+
+        return {
+            "success": success,
+            "message": message,
+        }
+
+
     def execute_command(self, command, data):
         command = str(command).strip().lower()
         data = data if isinstance(data, dict) else {}
@@ -710,6 +851,11 @@ class UavDashboardBridge(Node):
                     data["enabled"]
                 )
 
+            if command == "mission_process":
+                return self.execute_mission_process(
+                    data.get("action", "status")
+                )
+
             if command == "reset_failsafe":
                 return self.call_trigger(
                     self.reset_failsafe_client,
@@ -743,6 +889,18 @@ class UavDashboardBridge(Node):
 
         with self.lock:
             data = dict(self.telemetry)
+
+            mission_process_state = (
+                self.mission_process_status()
+            )
+
+            data["mission_process_state"] = (
+                mission_process_state
+            )
+
+            data["mission_process_running"] = (
+                mission_process_state == "active"
+            )
 
             data["state_age_sec"] = self.age(
                 now,

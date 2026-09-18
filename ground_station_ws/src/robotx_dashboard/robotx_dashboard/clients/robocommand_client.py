@@ -82,6 +82,9 @@ class RoboCommandClient:
         self.declaration_seq = None
         self.last_command = None
 
+        self.run_start_validated = False
+        self.run_start_validation_message = None
+
         self.last_rx = None
         self.last_tx = None
 
@@ -309,17 +312,79 @@ class RoboCommandClient:
                     self.last_command = body
 
                     if body == "run_start":
-                        self.run_state = "STARTED"
-                        self.run_id = int(
+
+                        received_team = str(
+                            command.team_id
+                        )
+
+                        received_seq = int(
+                            command.run_start.declaration_seq
+                        )
+
+                        received_run_id = int(
                             command.run_start.run_id
                         )
 
-                        summary = (
-                            "RunStart "
-                            f"run_id={self.run_id}, "
-                            "declaration_seq="
-                            f"{command.run_start.declaration_seq}"
+                        expected_seq = (
+                            self.declaration_seq
                         )
+
+                        if received_team != self.team_id:
+
+                            self.run_start_validated = False
+
+                            self.run_start_validation_message = (
+                                "RunStart rejected: "
+                                f"team_id={received_team}, "
+                                f"expected={self.team_id}"
+                            )
+
+                            summary = (
+                                self.run_start_validation_message
+                            )
+
+                        elif expected_seq is None:
+
+                            self.run_start_validated = False
+
+                            self.run_start_validation_message = (
+                                "RunStart rejected: "
+                                "no active RunDeclaration"
+                            )
+
+                            summary = (
+                                self.run_start_validation_message
+                            )
+
+                        elif received_seq != expected_seq:
+
+                            self.run_start_validated = False
+
+                            self.run_start_validation_message = (
+                                "RunStart rejected: "
+                                f"declaration_seq={received_seq}, "
+                                f"expected={expected_seq}"
+                            )
+
+                            summary = (
+                                self.run_start_validation_message
+                            )
+
+                        else:
+
+                            self.run_state = "STARTED"
+                            self.run_id = received_run_id
+                            self.run_start_validated = True
+
+                            self.run_start_validation_message = (
+                                "RunStart verified: "
+                                f"declaration_seq={received_seq}, "
+                                f"run_id={received_run_id}"
+                            )
+
+                            summary = (
+                                self.run_start_validation_message
+                            )
 
                 self._record(
                     "rx",
@@ -439,6 +504,12 @@ class RoboCommandClient:
                 "last_command":
                     self.last_command,
 
+                "run_start_validated":
+                    self.run_start_validated,
+
+                "run_start_validation_message":
+                    self.run_start_validation_message,
+
                 "last_rx_age_sec":
                     self._age(
                         now,
@@ -481,6 +552,46 @@ class RoboCommandClient:
                         )
                     ),
             }
+
+    def reset_run_session(self):
+        """
+        Reset only the RoboCommand run/session state.
+
+        This does NOT alter any physical vehicle state,
+        autonomy authorization, flight mode, arming state,
+        mission process, or safety state.
+        """
+
+        with self.lock:
+            self.run_state = "WAITING"
+            self.run_id = None
+            self.declaration_seq = None
+            self.last_command = None
+            self.request_seq = 0
+
+            if hasattr(
+                self,
+                "run_start_validated",
+            ):
+                self.run_start_validated = False
+
+            if hasattr(
+                self,
+                "run_start_validation_message",
+            ):
+                self.run_start_validation_message = None
+
+            self.rx_history.clear()
+            self.tx_history.clear()
+
+        return {
+            "success": True,
+            "message": (
+                "RoboCommand run session reset. "
+                "Vehicle state was not changed."
+            ),
+        }
+
 
     def clear_history(self):
         with self.lock:
@@ -702,6 +813,54 @@ class RoboCommandClient:
 
             speed = self._finite(speed)
 
+            roll = self._finite(
+                vehicle.get("roll_deg")
+            )
+
+            pitch = self._finite(
+                vehicle.get("pitch_deg")
+            )
+
+            # Ground-station altitude ultimately comes from
+            # sensor_msgs/NavSatFix altitude for the UAV.
+            altitude_hae = self._finite(
+                vehicle.get("altitude")
+            )
+
+            # Before a scored task begins, TASK_NONE is the
+            # correct explicit state. TASK_UNKNOWN must not
+            # be used as an idle/stand-down value.
+            current_task = (
+                rx_common_pb2.TASK_NONE
+            )
+
+            flight_phase = (
+                rx_common_pb2
+                .FLIGHT_PHASE_UNKNOWN
+            )
+
+            if proto_type == rx_common_pb2.TYPE_UAV:
+
+                relative_altitude = self._finite(
+                    vehicle.get(
+                        "relative_altitude"
+                    )
+                )
+
+                if (
+                    bool(vehicle.get("armed", False))
+                    and relative_altitude > 0.5
+                ):
+                    flight_phase = (
+                        rx_common_pb2
+                        .FLIGHT_PHASE_AIRBORNE
+                    )
+                else:
+                    flight_phase = (
+                        rx_common_pb2
+                        .FLIGHT_PHASE_GROUNDED
+                    )
+
             report = rx_reports_pb2.RxReport(
                 team_id=self.team_id,
                 vehicle_id=vehicle_id,
@@ -720,7 +879,12 @@ class RoboCommandClient:
                         ),
                         spd_mps=speed,
                         heading_deg=heading,
+                        roll_deg=roll,
+                        pitch_deg=pitch,
+                        altitude_hae_m=altitude_hae,
+                        current_task=current_task,
                         vehicle_type=proto_type,
+                        flight_phase=flight_phase,
                     )
                 ),
             )
@@ -943,6 +1107,10 @@ class RoboCommandClient:
             self.declaration_seq = seq
             self.run_state = "DECLARED"
             self.run_id = None
+            self.run_start_validated = False
+            self.run_start_validation_message = (
+                "Waiting for matching RunStart"
+            )
 
         return {
             "success": True,

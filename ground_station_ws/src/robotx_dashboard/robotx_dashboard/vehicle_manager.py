@@ -93,6 +93,12 @@ class VehicleManager:
 
                 "mission_state": None,
 
+                # Vehicle-local mission/autonomy process.
+                # This is independent of autopilot mode,
+                # arming and autonomy authorization.
+                "mission_process_state": "unknown",
+                "mission_process_running": False,
+
                 "bridge_forward": 0.0,
                 "bridge_yaw": 0.0,
                 "bridge_last_rx": None,

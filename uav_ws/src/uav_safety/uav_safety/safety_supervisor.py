@@ -209,26 +209,75 @@ class SafetySupervisor(Node):
 
         if self.failsafe_latched:
             state = SafetyStatus.FAILSAFE
-            reason = self.failsafe_reason or active_failure
+            reason = (
+                self.failsafe_reason
+                or active_failure
+            )
+
         elif not essential_received:
+            # Missing startup telemetry is still INIT, but
+            # merely enabling autonomy while DISARMED must
+            # never create a failsafe latch.
             state = SafetyStatus.INIT
             reason = first_base_failure
-        elif autonomy_enabled and not flight_ready:
+
+        elif (
+            autonomy_enabled
+            and armed
+            and not prearm_ready
+        ):
+            # Once physically armed under autonomous intent,
+            # losing a required flight prerequisite remains
+            # a real failsafe condition.
             self.failsafe_latched = True
-            self.failsafe_reason = active_failure
+            self.failsafe_reason = (
+                first_base_failure
+            )
+
             state = SafetyStatus.FAILSAFE
             reason = self.failsafe_reason
-        elif autonomy_enabled and flight_ready:
+
+        elif (
+            autonomy_enabled
+            and armed
+            and prearm_ready
+        ):
             state = SafetyStatus.ACTIVE
-            reason = 'autonomy active; all flight prerequisites satisfied'
+            reason = (
+                'autonomy active; all flight '
+                'prerequisites satisfied'
+            )
+
         elif prearm_ready:
             state = SafetyStatus.READY
-            reason = (
-                'ready to arm / accept vehicle commands'
-                if not armed else 'ready; vehicle armed and autonomy disabled')
+
+            if autonomy_enabled:
+                reason = (
+                    'autonomy enabled; vehicle '
+                    'DISARMED and ready to arm'
+                )
+            elif armed:
+                reason = (
+                    'ready; vehicle armed and '
+                    'autonomy disabled'
+                )
+            else:
+                reason = (
+                    'ready to arm / accept '
+                    'vehicle commands'
+                )
+
         else:
             state = SafetyStatus.NOT_READY
-            reason = first_base_failure
+
+            if autonomy_enabled and not armed:
+                reason = (
+                    'autonomy enabled while DISARMED; '
+                    'pre-arm blocked: '
+                    + first_base_failure
+                )
+            else:
+                reason = first_base_failure
 
         self._transition_log(state, reason)
 
