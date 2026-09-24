@@ -1,20 +1,32 @@
 #!/usr/bin/env python3
 
+import base64
 import json
 import math
 import socket
+import struct
 import subprocess
 import threading
 import time
+from pathlib import Path
 
 import rclpy
-from geometry_msgs.msg import TwistStamped
+from geometry_msgs.msg import PoseStamped, TwistStamped
 from mavros_msgs.msg import State, SysStatus
 from mavros_msgs.srv import CommandBool, SetMode
 from rclpy.node import Node
-from sensor_msgs.msg import BatteryState, Imu, NavSatFix
+from rclpy.qos import qos_profile_sensor_data
+from rclpy.time import Time
+from sensor_msgs.msg import (
+    BatteryState,
+    Imu,
+    NavSatFix,
+    PointCloud2,
+    PointField,
+)
 from std_msgs.msg import Bool, String
 from std_srvs.srv import SetBool, Trigger
+from tf2_ros import Buffer, TransformListener
 
 from boat_interfaces.msg import DetectedObjectArray, Gate
 from boat_interfaces.srv import ResetMissionLog
@@ -48,6 +60,38 @@ class BoatDashboardBridge(Node):
         self.gate_last_rx = None
         self.bridge_last_rx = None
         self.logger_last_rx = None
+
+        # USV_VISUALIZATION_V1
+        # Display-only state. No control or safety decisions use it.
+        self.cloud_last_rx = None
+        self.local_pose_last_rx = None
+        self.objects_last_rx = None
+        self.trajectory_last_append = None
+
+        self.visualization = {
+            "version": 1,
+            "cloud_frame": None,
+            "cloud_points": [],
+            "buoys": [],
+            "gate": None,
+            "local_pose": None,
+            "trajectory": [],
+            "attitude": {
+                "roll_deg": None,
+                "pitch_deg": None,
+                "yaw_deg": None,
+            },
+        }
+
+        self.visualization_max_points = 650
+        self.visualization_max_trajectory = 400
+
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(
+            self.tf_buffer,
+            self,
+            spin_thread=False,
+        )
 
         # Browser/Xbox operator input. Input arrives from
         # Beeptop over TCP and is republished locally on ROS.
@@ -181,6 +225,20 @@ class BoatDashboardBridge(Node):
             10,
         )
 
+        self.create_subscription(
+            PoseStamped,
+            "/mavros/local_position/pose",
+            self.local_pose_callback,
+            qos_profile_sensor_data,
+        )
+
+        self.create_subscription(
+            PointCloud2,
+            "/unilidar/cloud",
+            self.pointcloud_callback,
+            qos_profile_sensor_data,
+        )
+
         # Local control services. These are intentionally
         # executed on the Jetson so safety transactions do not
         # depend on the ground-station TCP link remaining alive.
@@ -246,6 +304,16 @@ class BoatDashboardBridge(Node):
         )
         self.telemetry_thread.start()
 
+        # Separate 2 Hz visualization stream. This prevents large
+        # point-cloud payloads from changing the normal 5 Hz telemetry
+        # behavior used by control/status displays.
+        self.visualization_thread = threading.Thread(
+            target=self.visualization_loop,
+            daemon=True,
+            name="dashboard-visualization",
+        )
+        self.visualization_thread.start()
+
         self.server_thread = threading.Thread(
             target=self.server_loop,
             daemon=True,
@@ -286,28 +354,32 @@ class BoatDashboardBridge(Node):
     def imu_callback(self, msg):
         q = msg.orientation
 
-        siny_cosp = 2.0 * (
-            q.w * q.z
-            + q.x * q.y
-        )
+        sinr_cosp = 2.0 * (q.w * q.x + q.y * q.z)
+        cosr_cosp = 1.0 - 2.0 * (q.x * q.x + q.y * q.y)
+        roll = math.atan2(sinr_cosp, cosr_cosp)
 
-        cosy_cosp = 1.0 - 2.0 * (
-            q.y * q.y
-            + q.z * q.z
-        )
+        sinp = 2.0 * (q.w * q.y - q.z * q.x)
+        if abs(sinp) >= 1.0:
+            pitch = math.copysign(math.pi / 2.0, sinp)
+        else:
+            pitch = math.asin(sinp)
 
-        yaw = math.atan2(
-            siny_cosp,
-            cosy_cosp,
-        )
+        siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+        cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+        yaw = math.atan2(siny_cosp, cosy_cosp)
 
-        heading = (
-            math.degrees(yaw)
-            + 360.0
-        ) % 360.0
+        roll_deg = math.degrees(roll)
+        pitch_deg = math.degrees(pitch)
+        yaw_deg = math.degrees(yaw)
+        heading = (yaw_deg + 360.0) % 360.0
 
         with self.lock:
             self.telemetry["heading_deg"] = heading
+            self.visualization["attitude"] = {
+                "roll_deg": round(roll_deg, 3),
+                "pitch_deg": round(pitch_deg, 3),
+                "yaw_deg": round(yaw_deg, 3),
+            }
 
     def battery_callback(self, msg):
         with self.lock:
@@ -357,22 +429,179 @@ class BoatDashboardBridge(Node):
                 self.telemetry["battery_remaining"] = None
 
     def objects_callback(self, msg):
+        color_names = {
+            0: "unknown",
+            1: "red",
+            2: "green",
+            3: "yellow",
+            4: "black",
+            5: "white",
+        }
+
+        objects = []
+        for item in msg.objects[:32]:
+            p = item.position
+            if not all(math.isfinite(v) for v in (p.x, p.y, p.z)):
+                continue
+            objects.append({
+                "id": int(item.id),
+                "type": int(item.object_type),
+                "color": color_names.get(int(item.color), "unknown"),
+                "x": round(float(p.x), 3),
+                "y": round(float(p.y), 3),
+                "z": round(float(p.z), 3),
+                "confidence": round(float(item.confidence), 3),
+            })
+
         with self.lock:
+            self.objects_last_rx = time.monotonic()
             self.telemetry["buoy_count"] = len(msg.objects)
+            self.visualization["buoys"] = objects
 
     def gate_callback(self, msg):
+        gate = {
+            "left": [
+                round(float(msg.left_marker.x), 3),
+                round(float(msg.left_marker.y), 3),
+                round(float(msg.left_marker.z), 3),
+            ],
+            "right": [
+                round(float(msg.right_marker.x), 3),
+                round(float(msg.right_marker.y), 3),
+                round(float(msg.right_marker.z), 3),
+            ],
+            "center": [
+                round(float(msg.center.x), 3),
+                round(float(msg.center.y), 3),
+                round(float(msg.center.z), 3),
+            ],
+            "width": round(float(msg.width), 3),
+            "confidence": round(float(msg.confidence), 3),
+        }
+
         with self.lock:
             self.gate_last_rx = time.monotonic()
+            self.telemetry["gate_confidence"] = float(msg.confidence)
+            self.telemetry["gate_x"] = float(msg.center.x)
+            self.telemetry["gate_y"] = float(msg.center.y)
+            self.visualization["gate"] = gate
 
-            self.telemetry["gate_confidence"] = float(
-                msg.confidence
-            )
-            self.telemetry["gate_x"] = float(
-                msg.center.x
-            )
-            self.telemetry["gate_y"] = float(
-                msg.center.y
-            )
+    def local_pose_callback(self, msg):
+        p = msg.pose.position
+        if not all(math.isfinite(v) for v in (p.x, p.y, p.z)):
+            return
+
+        now = time.monotonic()
+        point = [round(float(p.x), 3), round(float(p.y), 3), round(float(p.z), 3)]
+
+        with self.lock:
+            self.local_pose_last_rx = now
+            self.visualization["local_pose"] = point
+            trajectory = self.visualization["trajectory"]
+
+            append = not trajectory
+            if trajectory:
+                last = trajectory[-1]
+                distance = math.hypot(point[0] - last[0], point[1] - last[1])
+                if distance >= 0.10:
+                    append = True
+                elif self.trajectory_last_append is None or (now - self.trajectory_last_append) >= 1.0:
+                    append = True
+
+            if append:
+                trajectory.append(point)
+                if len(trajectory) > self.visualization_max_trajectory:
+                    del trajectory[:len(trajectory) - self.visualization_max_trajectory]
+                self.trajectory_last_append = now
+
+    @staticmethod
+    def _point_field_value(data, offset, field, endian):
+        if field.datatype == PointField.FLOAT32:
+            return struct.unpack_from(endian + "f", data, offset)[0]
+        if field.datatype == PointField.FLOAT64:
+            return struct.unpack_from(endian + "d", data, offset)[0]
+        return None
+
+    @staticmethod
+    def _apply_transform(point, transform):
+        x, y, z = point
+        q = transform.transform.rotation
+        t = transform.transform.translation
+
+        tx = 2.0 * (q.y * z - q.z * y)
+        ty = 2.0 * (q.z * x - q.x * z)
+        tz = 2.0 * (q.x * y - q.y * x)
+
+        rx = x + q.w * tx + (q.y * tz - q.z * ty)
+        ry = y + q.w * ty + (q.z * tx - q.x * tz)
+        rz = z + q.w * tz + (q.x * ty - q.y * tx)
+
+        return (rx + t.x, ry + t.y, rz + t.z)
+
+    def pointcloud_callback(self, msg):
+        fields = {field.name: field for field in msg.fields}
+        if not all(name in fields for name in ("x", "y", "z")):
+            return
+
+        total = int(msg.width) * int(msg.height)
+        if total <= 0 or msg.point_step <= 0 or msg.width <= 0:
+            return
+
+        stride = max(1, int(math.ceil(total / self.visualization_max_points)))
+        endian = ">" if msg.is_bigendian else "<"
+        points = []
+
+        source_frame = str(msg.header.frame_id or "lidar_link")
+        cloud_transform = None
+        cloud_frame = source_frame
+        cloud_transform_ok = source_frame == "base_link"
+
+        if not cloud_transform_ok:
+            try:
+                cloud_transform = self.tf_buffer.lookup_transform(
+                    "base_link",
+                    source_frame,
+                    Time(),
+                )
+                cloud_frame = "base_link"
+                cloud_transform_ok = True
+            except Exception:
+                cloud_transform = None
+
+        for index in range(0, total, stride):
+            row = index // int(msg.width)
+            col = index % int(msg.width)
+            base = row * int(msg.row_step) + col * int(msg.point_step)
+            try:
+                x = self._point_field_value(msg.data, base + fields["x"].offset, fields["x"], endian)
+                y = self._point_field_value(msg.data, base + fields["y"].offset, fields["y"], endian)
+                z = self._point_field_value(msg.data, base + fields["z"].offset, fields["z"], endian)
+            except (struct.error, IndexError, TypeError):
+                continue
+
+            if x is None or y is None or z is None:
+                continue
+            if not all(math.isfinite(v) for v in (x, y, z)):
+                continue
+            if (x * x + y * y + z * z) > 3600.0:
+                continue
+
+            if cloud_transform is not None:
+                x, y, z = self._apply_transform(
+                    (x, y, z),
+                    cloud_transform,
+                )
+
+            points.append([round(float(x), 3), round(float(y), 3), round(float(z), 3)])
+            if len(points) >= self.visualization_max_points:
+                break
+
+        with self.lock:
+            self.cloud_last_rx = time.monotonic()
+            self.visualization["cloud_frame"] = cloud_frame
+            self.visualization["cloud_source_frame"] = source_frame
+            self.visualization["cloud_transform_ok"] = cloud_transform_ok
+            self.visualization["cloud_points"] = points
 
     def control_callback(self, msg):
         with self.lock:
@@ -628,6 +857,45 @@ class BoatDashboardBridge(Node):
             message += f" ({detail})"
 
         return success, message
+
+
+    def get_mission_log_file(self, kind):
+        kind = str(kind or "csv").strip().lower()
+        if kind not in ("csv", "metadata"):
+            return False, "Log kind must be csv or metadata", {}
+
+        with self.lock:
+            raw_path = self.telemetry.get("log_file_path")
+
+        if not raw_path:
+            return False, "No mission log file is available yet", {}
+
+        root = (Path.home() / "robotx_logs").resolve()
+        csv_path = Path(str(raw_path)).expanduser().resolve()
+        if csv_path != root and root not in csv_path.parents:
+            return False, "Mission log path is outside ~/robotx_logs", {}
+
+        if kind == "metadata":
+            path = csv_path.with_name(csv_path.stem + "_metadata.json")
+            mime_type = "application/json"
+        else:
+            path = csv_path
+            mime_type = "text/csv"
+
+        if not path.is_file():
+            return False, f"{kind} log file does not exist", {}
+
+        size = path.stat().st_size
+        if size > 50 * 1024 * 1024:
+            return False, "Mission log exceeds 50 MiB transfer limit", {}
+
+        payload = base64.b64encode(path.read_bytes()).decode("ascii")
+        return True, f"{kind} log ready", {
+            "filename": path.name,
+            "mime_type": mime_type,
+            "file_size": size,
+            "file_content_b64": payload,
+        }
 
 
     def wait_future(self, future, timeout=2.0):
@@ -1600,6 +1868,9 @@ class BoatDashboardBridge(Node):
             "mission_process": lambda: self.execute_mission_process(
                 command_data.get("action", "status")
             ),
+            "get_log_file": lambda: self.get_mission_log_file(
+                command_data.get("kind", "csv")
+            ),
         }
 
         handler = handlers.get(command)
@@ -1661,6 +1932,54 @@ class BoatDashboardBridge(Node):
             )
         except OSError:
             pass
+
+    # ========================================================
+    # VISUALIZATION TELEMETRY
+    # ========================================================
+
+    def visualization_loop(self):
+        period = 0.50
+        while rclpy.ok():
+            start = time.monotonic()
+            try:
+                self.publish_visualization()
+            except Exception as exc:
+                self.get_logger().warn("Visualization send loop error: " + str(exc))
+            elapsed = time.monotonic() - start
+            time.sleep(max(0.02, period - elapsed))
+
+    def publish_visualization(self):
+        now = time.monotonic()
+        with self.lock:
+            src = self.visualization
+            data = {
+                "version": 1,
+                "cloud_frame": src.get("cloud_frame"),
+                "cloud_source_frame": src.get("cloud_source_frame"),
+                "cloud_transform_ok": bool(src.get("cloud_transform_ok", False)),
+                "cloud_points": [list(p) for p in src.get("cloud_points", [])],
+                "buoys": [dict(x) for x in src.get("buoys", [])],
+                "gate": None if src.get("gate") is None else dict(src["gate"]),
+                "local_pose": None if src.get("local_pose") is None else list(src["local_pose"]),
+                "trajectory": [list(p) for p in src.get("trajectory", [])],
+                "attitude": dict(src.get("attitude", {})),
+                "cloud_age_sec": None if self.cloud_last_rx is None else now - self.cloud_last_rx,
+                "local_pose_age_sec": None if self.local_pose_last_rx is None else now - self.local_pose_last_rx,
+                "objects_age_sec": None if self.objects_last_rx is None else now - self.objects_last_rx,
+                "gate_age_sec": None if self.gate_last_rx is None else now - self.gate_last_rx,
+            }
+
+        with self.client_lock:
+            client = self.client_socket
+        if client is None:
+            return
+
+        try:
+            self.send_to_socket(client, {"type": "visualization", "data": data})
+        except OSError:
+            with self.client_lock:
+                if self.client_socket is client:
+                    self.client_socket = None
 
     # ========================================================
     # TELEMETRY

@@ -142,14 +142,21 @@ class BoatClient(BaseVehicleClient):
                 "message": "Invalid BlueBoat response",
             }
 
-        return {
-            "success": bool(
-                response.get("success", False)
-            ),
-            "message": str(
-                response.get("message", "")
-            ),
-        }
+        result = dict(response)
+        result["success"] = bool(
+            response.get("success", False)
+        )
+        result["message"] = str(
+            response.get("message", "")
+        )
+
+        # Keep bridge-provided response fields such as
+        # mission-log file payloads while removing transport
+        # bookkeeping that callers do not need.
+        result.pop("type", None)
+        result.pop("request_id", None)
+
+        return result
 
     def _run(self):
         while not self._stop_event.is_set():
@@ -251,6 +258,12 @@ class BoatClient(BaseVehicleClient):
             if isinstance(data, dict):
                 self.update_state(**data)
 
+            return
+
+        if message_type == "visualization":
+            data = message.get("data", {})
+            if isinstance(data, dict):
+                self.update_state(visualization=data)
             return
 
         if message_type == "response":

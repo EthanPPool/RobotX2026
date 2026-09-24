@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import base64
 import math
 import re
 import subprocess
@@ -14,6 +15,8 @@ from flask import (
     request,
     send_file,
 )
+
+from waitress import serve
 
 import rclpy
 from rclpy.node import Node
@@ -396,6 +399,506 @@ HTML = r"""
             font-family: monospace;
             font-weight: bold;
             overflow-wrap: anywhere;
+        }
+
+
+
+        /* ==================================================
+           VEHICLE OPERATOR CONSOLE
+           ================================================== */
+
+        .console-status-panel {
+            overflow: hidden;
+            border: 1px solid #2d3d4b;
+            border-radius: 10px;
+            background: #0d141b;
+        }
+
+        .vehicle-console-header {
+            display: grid;
+            grid-template-columns:
+                minmax(180px, 1.3fr)
+                repeat(6, minmax(110px, 1fr));
+            align-items: stretch;
+            background: #101820;
+            border-bottom: 1px solid #344250;
+        }
+
+        .console-identity {
+            padding: 18px 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            border-right: 1px solid #344250;
+        }
+
+        .console-kicker {
+            color: #7f91a1;
+            font-size: 10px;
+            font-weight: bold;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .console-vehicle-name {
+            font-size: 25px;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+        }
+
+        .console-readout {
+            min-height: 72px;
+            padding: 12px 14px;
+            border-right: 1px solid #283744;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .console-readout:last-child {
+            border-right: 0;
+        }
+
+        .console-readout-label {
+            color: #778999;
+            font-size: 10px;
+            letter-spacing: 0.11em;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+
+        .console-state {
+            font-family: monospace;
+            font-weight: 700;
+            font-size: 14px;
+            overflow-wrap: anywhere;
+        }
+
+        .console-state.good {
+            color: #61d095;
+        }
+
+        .console-state.bad {
+            color: #ee6c6c;
+        }
+
+        .console-state.warn {
+            color: #ffd166;
+        }
+
+        .console-state.neutral {
+            color: #dce5ec;
+        }
+
+
+        /*
+         * Live data-flow strip.
+         *
+         * USV:
+         * perception -> follower -> bridge -> thrusters
+         *
+         * UAV:
+         * safety -> GPS -> pre-arm -> command authorization
+         */
+
+        .console-flow {
+            display: grid;
+            grid-template-columns:
+                repeat(4, minmax(130px, 1fr));
+            background: #111b24;
+            border-bottom: 1px solid #344250;
+        }
+
+        .console-flow-stage {
+            position: relative;
+            padding: 12px 18px;
+            border-right: 1px solid #283744;
+        }
+
+        .console-flow-stage:last-child {
+            border-right: 0;
+        }
+
+        .console-flow-stage:not(:last-child)::after {
+            content: "›";
+            position: absolute;
+            z-index: 2;
+            right: -7px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #607587;
+            font-size: 22px;
+            font-weight: bold;
+        }
+
+        .console-flow-label {
+            display: block;
+            margin-bottom: 4px;
+            color: #718493;
+            font-size: 10px;
+            letter-spacing: 0.11em;
+            text-transform: uppercase;
+        }
+
+
+        /*
+         * Main cockpit geometry:
+         *
+         * ┌─────────────────────────────┬──────────────┐
+         * │ live vehicle information    │ controls     │
+         * │                             │              │
+         * └─────────────────────────────┴──────────────┘
+         */
+
+        .console-layout {
+            display: grid;
+            grid-template-columns:
+                minmax(0, 1fr)
+                350px;
+            gap: 0;
+            align-items: start;
+        }
+
+        .console-main-grid {
+            min-width: 0;
+            display: grid;
+            grid-template-columns:
+                repeat(2, minmax(0, 1fr));
+            background: #0e161d;
+        }
+
+        .console-control-rail {
+            min-width: 0;
+            align-self: stretch;
+            background: #121c25;
+            border-left: 1px solid #344250;
+        }
+
+
+        /*
+         * These are still called ".card" internally so none
+         * of the old element IDs or update code have to change.
+         * Visually they are now integrated console modules.
+         */
+
+        .console-module.card {
+            margin: 0;
+            border: 0;
+            border-right: 1px solid #283744;
+            border-bottom: 1px solid #283744;
+            border-radius: 0;
+            background: transparent;
+            padding: 17px 19px;
+            min-width: 0;
+        }
+
+        .console-module.card h2 {
+            margin: 0 0 12px 0;
+            color: #8ea0ae;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.11em;
+        }
+
+        .console-module .row {
+            padding: 7px 0;
+        }
+
+        .console-module.console-wide {
+            grid-column: 1 / -1;
+        }
+
+        .console-control-rail
+        > .console-module.card {
+            border-right: 0;
+            background: transparent;
+            padding: 18px;
+        }
+
+        .console-control-rail
+        > .console-module.card h2 {
+            color: #b8c4ce;
+            font-size: 12px;
+        }
+
+        .console-control-rail
+        .control-button {
+            min-height: 48px;
+        }
+
+
+        /*
+         * Primary modules get slightly stronger emphasis.
+         */
+
+        .console-flight-hud {
+            background: #101a22 !important;
+        }
+
+        .console-perception {
+            background: #101a22 !important;
+        }
+
+        .console-pre-arm-checks {
+            background: #0e171e !important;
+        }
+
+        .console-thruster-outputs {
+            background: #0e171e !important;
+        }
+
+        .console-autonomy {
+            background: #0e171e !important;
+        }
+
+
+        /*
+         * Keep the attitude display dominant on the UAV.
+         */
+
+        .console-status-panel
+        .uav-hud-card {
+            grid-column: 1 / -1;
+        }
+
+
+        /*
+         * Parameters and geofence remain their own functional
+         * subtabs and deliberately retain their existing card
+         * presentation.
+         */
+
+
+        /* ==================================================
+           COMPACT USV OPERATOR CONSOLE
+           ================================================== */
+
+        /*
+         * The USV has many small telemetry groups.
+         * Use three columns instead of two.
+         */
+
+        .usv-console-status
+        .console-layout {
+            grid-template-columns:
+                minmax(0, 1fr)
+                300px;
+        }
+
+        .usv-console-status
+        .console-main-grid {
+            grid-template-columns:
+                repeat(3, minmax(0, 1fr));
+        }
+
+
+        /*
+         * USV modules no longer need forced full-width rows.
+         */
+
+        .usv-console-status
+        .console-module.console-wide {
+            grid-column: auto;
+        }
+
+
+        /*
+         * These generic modules duplicate information already
+         * visible in the persistent operator header:
+         *
+         * Connection -> LINK
+         * Autopilot  -> MODE / ARM
+         * Power      -> POWER
+         *
+         * Keep their elements in the DOM so existing telemetry
+         * Javascript still functions, but do not waste screen
+         * space displaying them twice.
+         */
+
+        .usv-console-status
+        .console-connection,
+
+        .usv-console-status
+        .console-autopilot,
+
+        .usv-console-status
+        .console-power {
+            display: none;
+        }
+
+
+        /*
+         * Tighter telemetry density.
+         */
+
+        .usv-console-status
+        .console-module.card {
+            padding: 12px 15px;
+        }
+
+        .usv-console-status
+        .console-module.card h2 {
+            margin-bottom: 8px;
+        }
+
+        .usv-console-status
+        .console-module .row {
+            padding: 5px 0;
+        }
+
+
+        /*
+         * Do not stretch the control rail to match the entire
+         * telemetry area. This removes the large empty vertical
+         * block beneath the controls.
+         */
+
+        .usv-console-status
+        .console-control-rail {
+            align-self: start;
+        }
+
+
+        /*
+         * Slightly compress the USV data-flow strip.
+         */
+
+        .usv-console-status
+        .console-flow-stage {
+            padding: 9px 15px;
+        }
+
+
+        /*
+         * Compact the top status bar slightly as well.
+         */
+
+        .usv-console-status
+        .console-readout {
+            min-height: 60px;
+            padding: 9px 11px;
+        }
+
+
+        @media (max-width: 1180px) {
+
+            .vehicle-console-header {
+                grid-template-columns:
+                    repeat(3, 1fr);
+            }
+
+            .console-identity {
+                grid-column: 1 / -1;
+                border-right: 0;
+                border-bottom: 1px solid #344250;
+            }
+
+            .console-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .console-control-rail {
+                border-left: 0;
+                border-top: 1px solid #344250;
+            }
+
+            .console-flow {
+                grid-template-columns:
+                    repeat(2, 1fr);
+            }
+        }
+
+
+        @media (max-width: 700px) {
+
+            .vehicle-console-header {
+                grid-template-columns:
+                    repeat(2, 1fr);
+            }
+
+            .console-main-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .console-module.console-wide {
+                grid-column: auto;
+            }
+
+            .console-flow {
+                grid-template-columns: 1fr;
+            }
+
+            .console-flow-stage {
+                border-right: 0;
+                border-bottom: 1px solid #283744;
+            }
+
+            .console-flow-stage::after {
+                display: none;
+            }
+        }
+
+
+        /* ==================================================
+           USV_VISUALIZATION_FRONTEND_V1
+           ================================================== */
+
+        .usv-viz-card {
+            grid-column: 1 / -1;
+        }
+
+        .usv-viz-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 3fr) minmax(220px, 1fr);
+            gap: 16px;
+            align-items: stretch;
+        }
+
+        .usv-viz-canvas-wrap {
+            position: relative;
+            width: 100%;
+            min-height: 500px;
+            background: #0b1016;
+            border: 1px solid #344250;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .usv-viz-canvas {
+            display: block;
+            width: 100%;
+            height: 500px;
+            cursor: grab;
+            touch-action: none;
+        }
+
+        .usv-viz-canvas.dragging { cursor: grabbing; }
+
+        .usv-viz-overlay {
+            position: absolute;
+            left: 10px;
+            top: 10px;
+            padding: 7px 9px;
+            border-radius: 5px;
+            background: rgba(8, 12, 17, 0.80);
+            font-family: monospace;
+            font-size: 12px;
+            pointer-events: none;
+        }
+
+        .usv-viz-help {
+            color: #9eacb9;
+            font-family: monospace;
+            font-size: 12px;
+            line-height: 1.45;
+            margin-top: 12px;
+        }
+
+        @media (max-width: 900px) {
+            .usv-viz-grid { grid-template-columns: 1fr; }
+            .usv-viz-canvas, .usv-viz-canvas-wrap { min-height: 420px; height: 420px; }
         }
 
 
@@ -1292,6 +1795,129 @@ HTML = r"""
             </div>
         </div>
 
+
+
+        <div
+            class="rc-wide"
+            style="
+                display:grid;
+                grid-template-columns:
+                    repeat(auto-fit, minmax(260px, 1fr));
+                gap:18px;
+            ">
+
+            <div class="card">
+                <h2>Communications PoR</h2>
+                <div class="row">
+                    <span>Status</span>
+                    <span class="value"
+                          id="rc-card-comms-status">
+                        NOT READY
+                    </span>
+                </div>
+                <div class="row">
+                    <span>Scope</span>
+                    <span class="value">USV1 + UAV1</span>
+                </div>
+                <div class="control-message"
+                     id="rc-card-comms-reason">
+                    Waiting for readiness data.
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>USV Mission PoR</h2>
+                <div class="row">
+                    <span>Status</span>
+                    <span class="value"
+                          id="rc-card-usv-status">
+                        NOT READY
+                    </span>
+                </div>
+                <div class="row">
+                    <span>Mission Process</span>
+                    <span class="value"
+                          id="rc-card-usv-process">
+                        STOPPED
+                    </span>
+                </div>
+                <div class="row">
+                    <span>Diagnostic Logger</span>
+                    <span class="value"
+                          id="rc-card-usv-logger">
+                        UNAVAILABLE
+                    </span>
+                </div>
+                <div class="control-message"
+                     id="rc-card-usv-reason">
+                    Waiting for USV readiness.
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>UAV Element 1 — Square</h2>
+                <div class="row">
+                    <span>Status</span>
+                    <span class="value"
+                          id="rc-card-uav1-status">
+                        NOT READY
+                    </span>
+                </div>
+                <div class="row">
+                    <span>Execution Evidence</span>
+                    <span class="value">
+                        NOT RUN / NOT TRACKED
+                    </span>
+                </div>
+                <div class="control-message"
+                     id="rc-card-uav1-reason">
+                    Waiting for UAV readiness.
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>UAV Element 2 — Hourglass</h2>
+                <div class="row">
+                    <span>Status</span>
+                    <span class="value"
+                          id="rc-card-uav2-status">
+                        NOT READY
+                    </span>
+                </div>
+                <div class="row">
+                    <span>Execution Evidence</span>
+                    <span class="value">
+                        NOT RUN / NOT TRACKED
+                    </span>
+                </div>
+                <div class="control-message"
+                     id="rc-card-uav2-reason">
+                    Waiting for UAV readiness.
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>UAV Element 3 — Pirouette</h2>
+                <div class="row">
+                    <span>Status</span>
+                    <span class="value"
+                          id="rc-card-uav3-status">
+                        NOT READY
+                    </span>
+                </div>
+                <div class="row">
+                    <span>Execution Evidence</span>
+                    <span class="value">
+                        NOT RUN / NOT TRACKED
+                    </span>
+                </div>
+                <div class="control-message"
+                     id="rc-card-uav3-reason">
+                    Waiting for UAV readiness.
+                </div>
+            </div>
+
+        </div>
 
 
         <div class="card">
@@ -3412,6 +4038,744 @@ function installTabHandlers() {
 }
 
 
+
+function consoleSlug(title) {
+
+    return String(title)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+}
+
+
+function setConsoleState(
+    id,
+    text,
+    state = "neutral"
+) {
+
+    const element =
+        document.getElementById(id);
+
+    if (!element) {
+        return;
+    }
+
+    element.textContent =
+        text ?? "--";
+
+    element.className =
+        `console-state ${state}`;
+}
+
+
+function finiteConsoleNumber(value) {
+
+    if (
+        value === null
+        || value === undefined
+    ) {
+        return null;
+    }
+
+    const number = Number(value);
+
+    return Number.isFinite(number)
+        ? number
+        : null;
+}
+
+
+function decorateVehicleConsole(
+    id,
+    vehicle
+) {
+
+    const statusPanel =
+        document.getElementById(
+            `${id}-status-panel`
+        );
+
+    if (!statusPanel) {
+        return;
+    }
+
+    const layout =
+        statusPanel.querySelector(
+            ".vehicle-layout"
+        );
+
+    if (!layout) {
+        return;
+    }
+
+
+    statusPanel.classList.add(
+        "console-status-panel"
+    );
+
+    if (vehicle.type === "USV") {
+        statusPanel.classList.add(
+            "usv-console-status"
+        );
+    }
+
+    layout.classList.add(
+        "console-layout"
+    );
+
+
+    const header =
+        document.createElement("div");
+
+    header.className =
+        "vehicle-console-header";
+
+    header.innerHTML = `
+
+        <div class="console-identity">
+            <div class="console-kicker">
+                VEHICLE OPERATOR CONSOLE
+            </div>
+
+            <div class="console-vehicle-name">
+                ${vehicle.name}
+            </div>
+        </div>
+
+
+        <div class="console-readout">
+            <span class="console-readout-label">
+                Link
+            </span>
+
+            <span
+                class="console-state neutral"
+                id="${id}-console-link">
+                --
+            </span>
+        </div>
+
+
+        <div class="console-readout">
+            <span class="console-readout-label">
+                Mode
+            </span>
+
+            <span
+                class="console-state neutral"
+                id="${id}-console-mode">
+                --
+            </span>
+        </div>
+
+
+        <div class="console-readout">
+            <span class="console-readout-label">
+                Arm
+            </span>
+
+            <span
+                class="console-state neutral"
+                id="${id}-console-arm">
+                --
+            </span>
+        </div>
+
+
+        <div class="console-readout">
+            <span class="console-readout-label">
+                Autonomy
+            </span>
+
+            <span
+                class="console-state neutral"
+                id="${id}-console-auto">
+                --
+            </span>
+        </div>
+
+
+        <div class="console-readout">
+            <span class="console-readout-label">
+                Power
+            </span>
+
+            <span
+                class="console-state neutral"
+                id="${id}-console-power">
+                --
+            </span>
+        </div>
+
+
+        <div class="console-readout">
+            <span class="console-readout-label">
+                Mission Process
+            </span>
+
+            <span
+                class="console-state neutral"
+                id="${id}-console-process">
+                --
+            </span>
+        </div>
+    `;
+
+
+    const flow =
+        document.createElement("div");
+
+    flow.className =
+        "console-flow";
+
+
+    if (vehicle.type === "USV") {
+
+        flow.innerHTML = `
+
+            <div class="console-flow-stage">
+                <span class="console-flow-label">
+                    Perception
+                </span>
+
+                <span
+                    class="console-state neutral"
+                    id="${id}-console-flow-1">
+                    WAITING
+                </span>
+            </div>
+
+
+            <div class="console-flow-stage">
+                <span class="console-flow-label">
+                    Follower
+                </span>
+
+                <span
+                    class="console-state neutral"
+                    id="${id}-console-flow-2">
+                    STOP
+                </span>
+            </div>
+
+
+            <div class="console-flow-stage">
+                <span class="console-flow-label">
+                    Command Bridge
+                </span>
+
+                <span
+                    class="console-state neutral"
+                    id="${id}-console-flow-3">
+                    IDLE
+                </span>
+            </div>
+
+
+            <div class="console-flow-stage">
+                <span class="console-flow-label">
+                    Thruster Telemetry
+                </span>
+
+                <span
+                    class="console-state neutral"
+                    id="${id}-console-flow-4">
+                    --
+                </span>
+            </div>
+        `;
+
+    } else if (vehicle.type === "UAV") {
+
+        flow.innerHTML = `
+
+            <div class="console-flow-stage">
+                <span class="console-flow-label">
+                    Safety
+                </span>
+
+                <span
+                    class="console-state neutral"
+                    id="${id}-console-flow-1">
+                    --
+                </span>
+            </div>
+
+
+            <div class="console-flow-stage">
+                <span class="console-flow-label">
+                    GPS
+                </span>
+
+                <span
+                    class="console-state neutral"
+                    id="${id}-console-flow-2">
+                    --
+                </span>
+            </div>
+
+
+            <div class="console-flow-stage">
+                <span class="console-flow-label">
+                    Pre-Arm
+                </span>
+
+                <span
+                    class="console-state neutral"
+                    id="${id}-console-flow-3">
+                    --
+                </span>
+            </div>
+
+
+            <div class="console-flow-stage">
+                <span class="console-flow-label">
+                    Command Authorization
+                </span>
+
+                <span
+                    class="console-state neutral"
+                    id="${id}-console-flow-4">
+                    --
+                </span>
+            </div>
+        `;
+    }
+
+
+    statusPanel.insertBefore(
+        header,
+        layout
+    );
+
+    statusPanel.insertBefore(
+        flow,
+        layout
+    );
+
+
+    /*
+     * Split existing modules into:
+     *
+     *   main telemetry workspace
+     *   right-side operator control rail
+     *
+     * Moving the DOM nodes preserves all existing IDs and
+     * inline control actions.
+     */
+
+    const cards =
+        Array.from(
+            layout.children
+        ).filter(
+            element =>
+                element.classList
+                    .contains("card")
+        );
+
+
+    const main =
+        document.createElement("main");
+
+    main.className =
+        "console-main-grid";
+
+
+    const rail =
+        document.createElement("aside");
+
+    rail.className =
+        "console-control-rail";
+
+
+    const controlTitles =
+        vehicle.type === "USV"
+            ? [
+                "Vehicle Control",
+                "Mission Control",
+                "Mission Process",
+            ]
+            : [
+                "Remote Flight Control",
+                "Mission Process",
+            ];
+
+
+    const wideTitles =
+        vehicle.type === "USV"
+            ? [
+                "Perception",
+                "Thruster Outputs",
+                "Xbox Operator Controller",
+            ]
+            : [
+                "Flight HUD",
+                "Pre-Arm Checks",
+            ];
+
+
+    const mainOrder =
+        vehicle.type === "USV"
+            ? [
+                "Perception",
+                "State Machine",
+                "Follower Command",
+                "Bridge Output",
+                "Thruster Outputs",
+                "Position",
+                "Battery Detail",
+                "Xbox Operator Controller",
+                "Connection",
+                "Autopilot",
+                "Power",
+            ]
+            : [
+                "Flight HUD",
+                "GPS / Navigation",
+                "Flight Safety",
+                "Pre-Arm Checks",
+                "Autonomy",
+                "Position",
+                "Connection",
+                "Autopilot",
+                "Power",
+            ];
+
+
+    const cardInfo =
+        cards.map(card => {
+
+            const heading =
+                card.querySelector("h2");
+
+            const title =
+                heading
+                    ? heading.textContent.trim()
+                    : "";
+
+            card.classList.add(
+                "console-module"
+            );
+
+            if (title) {
+
+                card.classList.add(
+                    `console-${consoleSlug(title)}`
+                );
+            }
+
+            if (
+                wideTitles.includes(title)
+            ) {
+
+                card.classList.add(
+                    "console-wide"
+                );
+            }
+
+            return {
+                card,
+                title,
+            };
+        });
+
+
+    const controlCards =
+        cardInfo
+            .filter(
+                item =>
+                    controlTitles.includes(
+                        item.title
+                    )
+            )
+            .sort(
+                (a, b) =>
+                    controlTitles.indexOf(
+                        a.title
+                    )
+                    -
+                    controlTitles.indexOf(
+                        b.title
+                    )
+            );
+
+
+    const mainCards =
+        cardInfo
+            .filter(
+                item =>
+                    !controlTitles.includes(
+                        item.title
+                    )
+            )
+            .sort(
+                (a, b) => {
+
+                    const ai =
+                        mainOrder.indexOf(
+                            a.title
+                        );
+
+                    const bi =
+                        mainOrder.indexOf(
+                            b.title
+                        );
+
+                    const aRank =
+                        ai < 0
+                            ? 999
+                            : ai;
+
+                    const bRank =
+                        bi < 0
+                            ? 999
+                            : bi;
+
+                    return aRank - bRank;
+                }
+            );
+
+
+    mainCards.forEach(
+        item =>
+            main.appendChild(
+                item.card
+            )
+    );
+
+
+    controlCards.forEach(
+        item =>
+            rail.appendChild(
+                item.card
+            )
+    );
+
+
+    layout.appendChild(main);
+    layout.appendChild(rail);
+}
+
+
+function updateVehicleConsoleHeader(
+    id,
+    vehicle
+) {
+
+    setConsoleState(
+        `${id}-console-link`,
+        vehicle.online
+            ? "ONLINE"
+            : "OFFLINE",
+        vehicle.online
+            ? "good"
+            : "bad"
+    );
+
+
+    setConsoleState(
+        `${id}-console-mode`,
+        vehicle.mode
+            ?? "UNKNOWN",
+        "neutral"
+    );
+
+
+    setConsoleState(
+        `${id}-console-arm`,
+        vehicle.armed
+            ? "ARMED"
+            : "DISARMED",
+        vehicle.armed
+            ? "warn"
+            : "neutral"
+    );
+
+
+    setConsoleState(
+        `${id}-console-auto`,
+        vehicle.autonomy_enabled
+            ? "AUTO"
+            : "MANUAL",
+        vehicle.autonomy_enabled
+            ? "good"
+            : "neutral"
+    );
+
+
+    let battery =
+        finiteConsoleNumber(
+            vehicle.battery_percent
+        );
+
+    if (battery === null) {
+
+        battery =
+            finiteConsoleNumber(
+                vehicle.battery_remaining
+            );
+    }
+
+
+    const voltage =
+        finiteConsoleNumber(
+            vehicle.voltage
+        );
+
+
+    let powerText = "--";
+
+    if (battery !== null) {
+
+        powerText =
+            `${battery.toFixed(0)}%`;
+
+        if (voltage !== null) {
+
+            powerText +=
+                ` · ${voltage.toFixed(1)} V`;
+        }
+
+    } else if (voltage !== null) {
+
+        powerText =
+            `${voltage.toFixed(1)} V`;
+    }
+
+
+    setConsoleState(
+        `${id}-console-power`,
+        powerText,
+        "neutral"
+    );
+
+
+    const processRunning =
+        Boolean(
+            vehicle.mission_process_running
+        );
+
+
+    setConsoleState(
+        `${id}-console-process`,
+        processRunning
+            ? "RUNNING"
+            : String(
+                vehicle.mission_process_state
+                ?? "STOPPED"
+            ).toUpperCase(),
+        processRunning
+            ? "good"
+            : "neutral"
+    );
+
+
+    if (vehicle.type === "USV") {
+
+        setConsoleState(
+            `${id}-console-flow-1`,
+            vehicle.gate_fresh
+                ? "GATE LOCK"
+                : "WAITING",
+            vehicle.gate_fresh
+                ? "good"
+                : "neutral"
+        );
+
+
+        setConsoleState(
+            `${id}-console-flow-2`,
+            vehicle.control_ready
+                ? "READY"
+                : "STOP",
+            vehicle.control_ready
+                ? "good"
+                : "neutral"
+        );
+
+
+        setConsoleState(
+            `${id}-console-flow-3`,
+            vehicle.bridge_command_active
+                ? "ACTIVE"
+                : "IDLE",
+            vehicle.bridge_command_active
+                ? "good"
+                : "neutral"
+        );
+
+
+        setConsoleState(
+            `${id}-console-flow-4`,
+            vehicle.servo_output_fresh
+                ? "LIVE"
+                : "STALE",
+            vehicle.servo_output_fresh
+                ? "good"
+                : "warn"
+        );
+
+    } else if (vehicle.type === "UAV") {
+
+        const safetyState =
+            String(
+                vehicle.safety_state
+                ?? "UNKNOWN"
+            ).toUpperCase();
+
+
+        setConsoleState(
+            `${id}-console-flow-1`,
+            safetyState,
+            safetyState === "READY"
+                || safetyState === "ACTIVE"
+                    ? "good"
+                    : (
+                        safetyState === "FAILSAFE"
+                            ? "bad"
+                            : "warn"
+                    )
+        );
+
+
+        setConsoleState(
+            `${id}-console-flow-2`,
+            vehicle.gps_valid
+                ? "VALID"
+                : "INVALID",
+            vehicle.gps_valid
+                ? "good"
+                : "bad"
+        );
+
+
+        setConsoleState(
+            `${id}-console-flow-3`,
+            vehicle.prearm_ready
+                ? "READY"
+                : "BLOCKED",
+            vehicle.prearm_ready
+                ? "good"
+                : "warn"
+        );
+
+
+        setConsoleState(
+            `${id}-console-flow-4`,
+            vehicle.authorized
+                ? "AUTHORIZED"
+                : "INHIBITED",
+            vehicle.authorized
+                ? "good"
+                : "neutral"
+        );
+    }
+}
+
+
+
 function makeVehiclePage(id, vehicle) {
 
     const tabs =
@@ -3441,6 +4805,43 @@ function makeVehiclePage(id, vehicle) {
     if (vehicle.type === "USV") {
 
         usvCards = `
+
+            <div class="card usv-viz-card">
+                <h2>USV Visualization</h2>
+
+                <div class="usv-viz-grid">
+                    <div class="usv-viz-canvas-wrap">
+                        <canvas class="usv-viz-canvas" id="${id}-viz-canvas"></canvas>
+                        <div class="usv-viz-overlay" id="${id}-viz-overlay">
+                            Waiting for Jetson visualization data.
+                        </div>
+                    </div>
+
+                    <div>
+                        <div class="row"><span>LiDAR Frame</span><span class="value" id="${id}-viz-frame">--</span></div>
+                        <div class="row"><span>Frame Alignment</span><span class="value" id="${id}-viz-transform">--</span></div>
+                        <div class="row"><span>LiDAR Points</span><span class="value" id="${id}-viz-points">0</span></div>
+                        <div class="row"><span>Cloud Age</span><span class="value" id="${id}-viz-cloud-age">--</span></div>
+                        <div class="row"><span>Local Pose</span><span class="value" id="${id}-viz-local-pose">--</span></div>
+                        <div class="row"><span>Roll / Pitch</span><span class="value" id="${id}-viz-attitude">--</span></div>
+                        <div class="row"><span>Heading</span><span class="value" id="${id}-viz-heading">--</span></div>
+                        <div class="row"><span>Buoys</span><span class="value" id="${id}-viz-buoys">0</span></div>
+                        <div class="row"><span>Gate</span><span class="value" id="${id}-viz-gate">NONE</span></div>
+
+                        <button class="control-button" onclick="resetUsvVisualizationView('${id}')">
+                            RESET VIEW
+                        </button>
+
+                        <div class="usv-viz-help">
+                            Drag: orbit view<br>
+                            Mouse wheel: zoom<br>
+                            X = forward, Y = left, Z = up<br><br>
+                            Point cloud is downsampled on the Jetson before TCP 8765.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
 
             <div class="card">
                 <h2>Battery Detail</h2>
@@ -3748,6 +5149,20 @@ function makeVehiclePage(id, vehicle) {
                         --
                     </span>
                 </div>
+
+                <button
+                    class="control-button"
+                    id="${id}-download-csv-button"
+                    onclick="downloadUsvMissionLog('csv')">
+                    DOWNLOAD MISSION CSV
+                </button>
+
+                <button
+                    class="control-button"
+                    id="${id}-download-metadata-button"
+                    onclick="downloadUsvMissionLog('metadata')">
+                    DOWNLOAD METADATA
+                </button>
 
 
                 <div class="switch-row">
@@ -4657,17 +6072,46 @@ function makeVehiclePage(id, vehicle) {
 
     document.body.appendChild(page);
 
-    vehiclePages[id] = true;
+
+    // The page must be attached to the document before
+    // decorateVehicleConsole() uses document.getElementById().
+    decorateVehicleConsole(
+        id,
+        vehicle
+    );
+
+    if (vehicle.type === "USV") {
+
+        // Put the USV visualization at the top of the
+        // status page, matching the UAV Flight HUD layout.
+        const vizCanvas =
+            document.getElementById(
+                `${id}-viz-canvas`
+            );
+
+        const vizCard =
+            vizCanvas
+                ? vizCanvas.closest(".card")
+                : null;
+
+        if (
+            vizCard
+            && vizCard.parentElement
+        ) {
+            vizCard.parentElement.prepend(
+                vizCard
+            );
+        }
+
+        initUsvVisualization(id);
+    }
 
     refreshPorEvidence();
 
-setInterval(
-    refreshPorEvidence,
-    1000
-);
 
+    vehiclePages[id] = true;
 
-installTabHandlers();
+    installTabHandlers();
 }
 
 
@@ -5652,11 +7096,293 @@ function formatQuadrantalHeading(value) {
 }
 
 
+/* ==========================================================
+   USV_VISUALIZATION_FRONTEND_V1
+   Lightweight self-contained RViz-style canvas.
+   ========================================================== */
+
+const usvVisualizationViews = {};
+
+function usvVizNumber(value, fallback = 0.0) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+}
+
+function usvVizAge(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? `${n.toFixed(1)} s` : "--";
+}
+
+function usvVizProject(state, point, width, height) {
+    const x = usvVizNumber(point[0]);
+    const y = usvVizNumber(point[1]);
+    const z = usvVizNumber(point[2]);
+
+    const cy = Math.cos(state.viewYaw);
+    const sy = Math.sin(state.viewYaw);
+    const cp = Math.cos(state.viewPitch);
+    const sp = Math.sin(state.viewPitch);
+
+    const xr = cy * x - sy * y;
+    const yr = sy * x + cy * y;
+
+    return {
+        x: width * 0.50 + xr * state.scale,
+        y: height * 0.56 - (yr * sp + z * cp) * state.scale,
+    };
+}
+
+function usvVizLine(ctx, state, a, b, width, height, stroke, lineWidth = 1) {
+    const pa = usvVizProject(state, a, width, height);
+    const pb = usvVizProject(state, b, width, height);
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
+}
+
+function usvVizPoint(ctx, state, point, width, height, fill, radius) {
+    const p = usvVizProject(state, point, width, height);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = fill;
+    ctx.fill();
+}
+
+function usvVizBuoyColor(name) {
+    const colors = {
+        red: "#ff6565",
+        green: "#61d095",
+        yellow: "#ffd84d",
+        black: "#606872",
+        white: "#f0f3f5",
+        unknown: "#b7c0c9",
+    };
+    return colors[String(name ?? "unknown").toLowerCase()] ?? colors.unknown;
+}
+
+function renderUsvVisualization(id) {
+    const state = usvVisualizationViews[id];
+    if (!state) return;
+
+    const canvas = document.getElementById(`${id}-viz-canvas`);
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const dpr = Math.min(2.0, window.devicePixelRatio || 1.0);
+    const width = Math.max(320, Math.floor(rect.width));
+    const height = Math.max(360, Math.floor(rect.height));
+    const pw = Math.floor(width * dpr);
+    const ph = Math.floor(height * dpr);
+
+    if (canvas.width !== pw || canvas.height !== ph) {
+        canvas.width = pw;
+        canvas.height = ph;
+    }
+
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = "#0b1016";
+    ctx.fillRect(0, 0, width, height);
+
+    const gridRange = 20;
+    for (let v = -gridRange; v <= gridRange; v += 2) {
+        const color = v === 0 ? "#43566a" : "#1d2935";
+        usvVizLine(ctx, state, [v, -gridRange, 0], [v, gridRange, 0], width, height, color, v === 0 ? 1.4 : 1);
+        usvVizLine(ctx, state, [-gridRange, v, 0], [gridRange, v, 0], width, height, color, v === 0 ? 1.4 : 1);
+    }
+
+    usvVizLine(ctx, state, [0,0,0], [4,0,0], width, height, "#ef6461", 3);
+    usvVizLine(ctx, state, [0,0,0], [0,4,0], width, height, "#61d095", 3);
+    usvVizLine(ctx, state, [0,0,0], [0,0,4], width, height, "#4da3ff", 3);
+
+    const data = state.data ?? {};
+    const points = Array.isArray(data.cloud_points) ? data.cloud_points : [];
+
+    for (const point of points) {
+        if (!Array.isArray(point) || point.length < 3) continue;
+        const z = usvVizNumber(point[2]);
+        const t = Math.max(0, Math.min(1, (z + 1.5) / 4.0));
+        const hue = 205 - t * 115;
+        usvVizPoint(ctx, state, point, width, height, `hsl(${hue},80%,62%)`, 1.7);
+    }
+
+    const trajectory = Array.isArray(data.trajectory) ? data.trajectory : [];
+    const localPose = Array.isArray(data.local_pose) ? data.local_pose : null;
+    const attitude = data.attitude ?? {};
+    const yaw = usvVizNumber(attitude.yaw_deg) * Math.PI / 180.0;
+
+    const bodyTrajectory = [];
+    if (localPose && localPose.length >= 3) {
+        const cx = usvVizNumber(localPose[0]);
+        const cy0 = usvVizNumber(localPose[1]);
+        const cz = usvVizNumber(localPose[2]);
+        const c = Math.cos(yaw);
+        const sn = Math.sin(yaw);
+        for (const point of trajectory) {
+            if (!Array.isArray(point) || point.length < 3) continue;
+            const dx = usvVizNumber(point[0]) - cx;
+            const dy = usvVizNumber(point[1]) - cy0;
+            const dz = usvVizNumber(point[2]) - cz;
+            bodyTrajectory.push([c * dx + sn * dy, -sn * dx + c * dy, dz]);
+        }
+    }
+
+    for (let i = 1; i < bodyTrajectory.length; i += 1) {
+        usvVizLine(ctx, state, bodyTrajectory[i-1], bodyTrajectory[i], width, height, "#c98cff", 2);
+    }
+
+    const buoys = Array.isArray(data.buoys) ? data.buoys : [];
+    for (const buoy of buoys) {
+        usvVizPoint(ctx, state, [buoy.x, buoy.y, buoy.z], width, height, usvVizBuoyColor(buoy.color), 6);
+    }
+
+    const gate = data.gate;
+    if (gate && Array.isArray(gate.left) && Array.isArray(gate.right)) {
+        usvVizLine(ctx, state, gate.left, gate.right, width, height, "#ffd84d", 4);
+        usvVizPoint(ctx, state, gate.left, width, height, "#ff6565", 7);
+        usvVizPoint(ctx, state, gate.right, width, height, "#61d095", 7);
+        if (Array.isArray(gate.center)) usvVizPoint(ctx, state, gate.center, width, height, "#ffd84d", 5);
+    }
+
+    const nose = usvVizProject(state, [1.25, 0, 0.20], width, height);
+    const port = usvVizProject(state, [-0.75, 0.65, 0], width, height);
+    const starboard = usvVizProject(state, [-0.75, -0.65, 0], width, height);
+    ctx.beginPath();
+    ctx.moveTo(nose.x, nose.y);
+    ctx.lineTo(port.x, port.y);
+    ctx.lineTo(starboard.x, starboard.y);
+    ctx.closePath();
+    ctx.fillStyle = "#ffcc4d";
+    ctx.fill();
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1.3;
+    ctx.stroke();
+}
+
+function resetUsvVisualizationView(id) {
+    const state = usvVisualizationViews[id];
+    if (!state) return;
+    state.viewYaw = -0.72;
+    state.viewPitch = -0.58;
+    state.scale = 18.0;
+    renderUsvVisualization(id);
+}
+
+function initUsvVisualization(id) {
+    if (usvVisualizationViews[id]) return;
+    const canvas = document.getElementById(`${id}-viz-canvas`);
+    if (!canvas) return;
+
+    const state = {
+        data: {},
+        viewYaw: -0.72,
+        viewPitch: -0.58,
+        scale: 18.0,
+        dragging: false,
+        lastX: 0,
+        lastY: 0,
+    };
+    usvVisualizationViews[id] = state;
+
+    canvas.addEventListener("pointerdown", event => {
+        state.dragging = true;
+        state.lastX = event.clientX;
+        state.lastY = event.clientY;
+        canvas.classList.add("dragging");
+        canvas.setPointerCapture(event.pointerId);
+    });
+
+    canvas.addEventListener("pointermove", event => {
+        if (!state.dragging) return;
+        const dx = event.clientX - state.lastX;
+        const dy = event.clientY - state.lastY;
+        state.lastX = event.clientX;
+        state.lastY = event.clientY;
+        state.viewYaw += dx * 0.008;
+        state.viewPitch = Math.max(-1.35, Math.min(-0.08, state.viewPitch + dy * 0.006));
+        renderUsvVisualization(id);
+    });
+
+    const stopDrag = event => {
+        state.dragging = false;
+        canvas.classList.remove("dragging");
+        try { canvas.releasePointerCapture(event.pointerId); } catch (_) {}
+    };
+    canvas.addEventListener("pointerup", stopDrag);
+    canvas.addEventListener("pointercancel", stopDrag);
+
+    canvas.addEventListener("wheel", event => {
+        event.preventDefault();
+        state.scale = Math.max(4.0, Math.min(80.0, state.scale * Math.exp(-event.deltaY * 0.001)));
+        renderUsvVisualization(id);
+    }, {passive: false});
+
+    window.addEventListener("resize", () => renderUsvVisualization(id));
+    renderUsvVisualization(id);
+}
+
+function updateUsvVisualization(id, visualization) {
+    const state = usvVisualizationViews[id];
+    if (!state) return;
+    const data = visualization && typeof visualization === "object" ? visualization : {};
+    state.data = data;
+
+    const points = Array.isArray(data.cloud_points) ? data.cloud_points : [];
+    const buoys = Array.isArray(data.buoys) ? data.buoys : [];
+    const gate = data.gate ?? null;
+    const pose = Array.isArray(data.local_pose) ? data.local_pose : null;
+    const attitude = data.attitude ?? {};
+
+    setText(`${id}-viz-frame`, data.cloud_frame ?? "--");
+    setText(`${id}-viz-transform`, data.cloud_transform_ok ? "BASE_LINK" : "UNALIGNED");
+    setText(`${id}-viz-points`, String(points.length));
+    setText(`${id}-viz-cloud-age`, usvVizAge(data.cloud_age_sec));
+    setText(`${id}-viz-local-pose`, pose ? `${usvVizNumber(pose[0]).toFixed(2)}, ${usvVizNumber(pose[1]).toFixed(2)}, ${usvVizNumber(pose[2]).toFixed(2)} m` : "--");
+
+    const roll = Number(attitude.roll_deg);
+    const pitch = Number(attitude.pitch_deg);
+    const yaw = Number(attitude.yaw_deg);
+    setText(`${id}-viz-attitude`, Number.isFinite(roll) && Number.isFinite(pitch) ? `${roll.toFixed(1)}° / ${pitch.toFixed(1)}°` : "--");
+    setText(`${id}-viz-heading`, Number.isFinite(yaw) ? `${((yaw + 360) % 360).toFixed(1)}°` : "--");
+    setText(`${id}-viz-buoys`, String(buoys.length));
+    setText(`${id}-viz-gate`, gate ? "DETECTED" : "NONE");
+
+    const overlay = document.getElementById(`${id}-viz-overlay`);
+    if (overlay) {
+        const age = Number(data.cloud_age_sec);
+        if (points.length > 0 && Number.isFinite(age) && age < 2.0 && data.cloud_transform_ok) {
+            overlay.textContent = `${points.length} LiDAR points | LIVE | base_link`;
+            overlay.className = "usv-viz-overlay connected";
+        } else if (points.length > 0 && !data.cloud_transform_ok) {
+            overlay.textContent = `${points.length} LiDAR points | LIVE | TF UNALIGNED`;
+            overlay.className = "usv-viz-overlay disconnected";
+        } else if (points.length > 0) {
+            overlay.textContent = `${points.length} LiDAR points | STALE`;
+            overlay.className = "usv-viz-overlay disconnected";
+        } else {
+            overlay.textContent = "Waiting for Unitree L2 point cloud.";
+            overlay.className = "usv-viz-overlay";
+        }
+    }
+
+    renderUsvVisualization(id);
+}
+
 function updateVehicle(id, vehicle) {
 
     if (!vehiclePages[id]) {
         makeVehiclePage(id, vehicle);
     }
+
+
+    updateVehicleConsoleHeader(
+        id,
+        vehicle
+    );
 
 
     const missionState =
@@ -5721,6 +7447,11 @@ function updateVehicle(id, vehicle) {
 
 
     if (vehicle.type === "USV") {
+
+        updateUsvVisualization(
+            id,
+            vehicle.visualization ?? {}
+        );
 
         setText(
             `${id}-port-thruster`,
@@ -5921,6 +7652,16 @@ function updateVehicle(id, vehicle) {
                 `${id}-stop-switch`
             );
 
+        const downloadCsvButton =
+            document.getElementById(
+                `${id}-download-csv-button`
+            );
+
+        const downloadMetadataButton =
+            document.getElementById(
+                `${id}-download-metadata-button`
+            );
+
 
         if (armButton) {
             armButton.disabled =
@@ -5940,6 +7681,21 @@ function updateVehicle(id, vehicle) {
         if (resetButton) {
             resetButton.disabled =
                 !vehicle.online;
+        }
+
+        const logAvailable = Boolean(
+            vehicle.jetson_link
+            && vehicle.log_file_path
+        );
+
+        if (downloadCsvButton) {
+            downloadCsvButton.disabled =
+                !logAvailable;
+        }
+
+        if (downloadMetadataButton) {
+            downloadMetadataButton.disabled =
+                !logAvailable;
         }
 
 
@@ -6515,7 +8271,12 @@ async function missionProcessAction(
             );
 
 
-    if (!confirm(warning)) {
+    // USV mission-process controls execute immediately.
+    // Other vehicle types retain their existing confirmation.
+    if (
+        vehicleId !== "boat"
+        && !confirm(warning)
+    ) {
         return;
     }
 
@@ -6658,6 +8419,8 @@ async function usvControlAction(action) {
 
     let requestData = null;
 
+    // ARM is the only USV action requiring an
+    // additional operator confirmation.
     if (action === "arm") {
 
         if (!confirm(
@@ -6669,50 +8432,46 @@ async function usvControlAction(action) {
     }
 
 
-    if (action === "enable") {
-
-        if (!confirm(
-            "Prepare autonomous control? "
-            + "The USV will enter GUIDED while "
-            + "DISARMED and wait for ARM."
-        )) {
-            return;
-        }
-    }
-
-
-    if (action === "disarm") {
-
-        if (!confirm(
-            "DISARM the USV and revoke "
-            + "autonomy?"
-        )) {
-            return;
-        }
-    }
-
-
     if (action === "reset_mission") {
 
         const labelInput =
-            document.getElementById("boat-log-label");
+            document.getElementById(
+                "boat-log-label"
+            );
 
         const label = labelInput
             ? labelInput.value.trim()
             : "";
 
-        if (!confirm(
-            "Reset the mission and prepare a new diagnostic log? "
-            + "No file or mission number is created until the USV arms."
-        )) {
-            return;
-        }
-
-        requestData = {label: label};
+        requestData = {
+            label: label
+        };
     }
 
 
-    await postUsvControl(action, requestData);
+    await postUsvControl(
+        action,
+        requestData
+    );
+}
+
+
+function downloadUsvMissionLog(kind) {
+
+    const normalized =
+        String(kind ?? "")
+        .trim()
+        .toLowerCase();
+
+    if (
+        normalized !== "csv"
+        && normalized !== "metadata"
+    ) {
+        return;
+    }
+
+    window.location.href =
+        `/api/usv/log/download/${normalized}`;
 }
 
 
@@ -6720,23 +8479,6 @@ async function toggleUsvStop(input) {
 
     const requestedEngaged =
         input.checked;
-
-
-    if (!requestedEngaged) {
-
-        const confirmed = confirm(
-            "Clear the SOFTWARE STOP?\n\n"
-            + "This does NOT arm the USV and "
-            + "does NOT enable autonomy."
-        );
-
-        if (!confirmed) {
-
-            input.checked = true;
-
-            return;
-        }
-    }
 
 
     input.disabled = true;
@@ -6931,7 +8673,12 @@ async function uavSetAutonomy(enabled) {
 const GAMEPAD_DEADZONE = 0.12;
 const GAMEPAD_PERIOD_MS = 50;
 
-let operatorPostBusy = false;
+let operatorPostInFlight = false;
+let operatorPendingState = null;
+let operatorLastBackendSuccess = 0;
+
+const OPERATOR_POST_TIMEOUT_MS = 200;
+const OPERATOR_BACKEND_LOST_MS = 500;
 
 
 function applyGamepadDeadzone(value) {
@@ -7009,9 +8756,109 @@ function setControllerValue(
 }
 
 
-async function updateGamepad() {
 
-    const pad = findOperatorGamepad();
+async function flushOperatorInput() {
+
+    if (
+        operatorPostInFlight
+        || operatorPendingState === null
+    ) {
+        return;
+    }
+
+    const payload =
+        operatorPendingState;
+
+    operatorPendingState = null;
+    operatorPostInFlight = true;
+
+    const controller =
+        new AbortController();
+
+    const timeoutId =
+        setTimeout(
+            () => controller.abort(),
+            OPERATOR_POST_TIMEOUT_MS
+        );
+
+    try {
+
+        const response = await fetch(
+            "/api/operator_input",
+            {
+                method: "POST",
+                cache: "no-store",
+                signal: controller.signal,
+                headers: {
+                    "Content-Type":
+                        "application/json"
+                },
+                body: JSON.stringify(
+                    payload
+                )
+            }
+        );
+
+        const result =
+            await response.json();
+
+        if (result.success) {
+
+            operatorLastBackendSuccess =
+                performance.now();
+
+            setControllerValue(
+                "boat-operator-backend",
+                "RECEIVING",
+                true
+            );
+
+        } else {
+
+            setControllerValue(
+                "boat-operator-backend",
+                "REJECTED",
+                false
+            );
+        }
+
+    } catch (error) {
+
+        const age =
+            performance.now()
+            - operatorLastBackendSuccess;
+
+        if (
+            operatorLastBackendSuccess === 0
+            || age >= OPERATOR_BACKEND_LOST_MS
+        ) {
+            setControllerValue(
+                "boat-operator-backend",
+                "LOST",
+                false
+            );
+        }
+
+    } finally {
+
+        clearTimeout(timeoutId);
+
+        operatorPostInFlight = false;
+
+        if (operatorPendingState !== null) {
+            setTimeout(
+                flushOperatorInput,
+                0
+            );
+        }
+    }
+}
+
+
+function updateGamepad() {
+
+    const pad =
+        findOperatorGamepad();
 
     const connected = !!pad;
 
@@ -7032,19 +8879,13 @@ async function updateGamepad() {
                 pad.axes[1] || 0.0
             );
 
-        // Standard Gamepad mapping:
-        // button 4 = Xbox LB.
         deadman = !!(
             pad.buttons[4]
             && pad.buttons[4].pressed
         );
 
         if (deadman) {
-
-            // Browser axis 1 is negative forward.
             forward = -leftY;
-
-            // Positive X = right.
             yaw = leftX;
         }
     }
@@ -7077,56 +8918,18 @@ async function updateGamepad() {
     );
 
 
-    if (operatorPostBusy) {
-        return;
-    }
+    // Keep only the newest controller state.
+    // Never build a backlog of stale stick commands.
+    operatorPendingState = {
+        connected: connected,
+        deadman: deadman,
+        forward: forward,
+        yaw: yaw
+    };
 
-    operatorPostBusy = true;
-
-    try {
-
-        const response = await fetch(
-            "/api/operator_input",
-            {
-                method: "POST",
-                cache: "no-store",
-                headers: {
-                    "Content-Type":
-                        "application/json"
-                },
-                body: JSON.stringify({
-                    connected: connected,
-                    deadman: deadman,
-                    forward: forward,
-                    yaw: yaw
-                })
-            }
-        );
-
-        const result =
-            await response.json();
-
-        setControllerValue(
-            "boat-operator-backend",
-            result.success
-                ? "RECEIVING"
-                : "REJECTED",
-            result.success
-        );
-
-    } catch (error) {
-
-        setControllerValue(
-            "boat-operator-backend",
-            "LOST",
-            false
-        );
-
-    } finally {
-
-        operatorPostBusy = false;
-    }
+    flushOperatorInput();
 }
+
 
 
 setInterval(
@@ -7135,6 +8938,28 @@ setInterval(
 );
 
 updateGamepad();
+
+
+
+function startAsyncPoll(callback, periodMs) {
+
+    const run = async () => {
+
+        try {
+            await callback();
+        } catch (error) {
+            // Individual refresh functions already handle
+            // their own UI error states.
+        } finally {
+            window.setTimeout(
+                run,
+                periodMs
+            );
+        }
+    };
+
+    run();
+}
 
 
 async function refresh() {
@@ -7533,6 +9358,136 @@ async function refreshPorReadiness() {
             fenceReady,
             "VERIFIED",
             "NOT VERIFIED"
+        );
+
+        const usvLoggerReady =
+            Boolean(
+                boat.logger_fresh
+                && String(
+                    boat.log_state
+                    ?? "UNAVAILABLE"
+                ).toUpperCase()
+                    !== "UNAVAILABLE"
+            );
+
+        const usvCardReady =
+            Boolean(
+                usvCommsReady
+                && usvMissionReady
+                && usvLoggerReady
+            );
+
+        const uavElementReady =
+            Boolean(
+                uavCommsReady
+                && uavMissionReady
+                && fenceReady
+            );
+
+        porSet(
+            "rc-card-comms-status",
+            prerequisitesReady,
+            "READY",
+            "NOT READY"
+        );
+
+        porSet(
+            "rc-card-usv-status",
+            usvCardReady,
+            "READY",
+            "NOT READY"
+        );
+
+        porSet(
+            "rc-card-usv-process",
+            usvMissionReady,
+            "RUNNING",
+            "STOPPED"
+        );
+
+        porSet(
+            "rc-card-usv-logger",
+            usvLoggerReady,
+            String(
+                boat.log_state
+                ?? "READY"
+            ).toUpperCase(),
+            "UNAVAILABLE"
+        );
+
+        porSet(
+            "rc-card-uav1-status",
+            uavElementReady,
+            "READY",
+            "NOT READY"
+        );
+
+        porSet(
+            "rc-card-uav2-status",
+            uavElementReady,
+            "READY",
+            "NOT READY"
+        );
+
+        porSet(
+            "rc-card-uav3-status",
+            uavElementReady,
+            "READY",
+            "NOT READY"
+        );
+
+        setText(
+            "rc-card-comms-reason",
+            prerequisitesReady
+                ? (
+                    "Communications prerequisites satisfied. "
+                    + "Use the official rc-test log as evidence."
+                )
+                : (
+                    "Communications requires both vehicles, "
+                    + "mission processes, course, RoboCommand "
+                    + "broker, and UAV geofence."
+                )
+        );
+
+        setText(
+            "rc-card-usv-reason",
+            usvCardReady
+                ? (
+                    "USV is independently ready for a mission "
+                    + "run and diagnostic logging."
+                )
+                : (
+                    "USV-only readiness does not depend on "
+                    + "UAV status. Check USV communications, "
+                    + "mission process, and diagnostic logger."
+                )
+        );
+
+        const uavReason =
+            uavElementReady
+                ? (
+                    "UAV prerequisites are ready. Execution "
+                    + "evidence is intentionally not inferred."
+                )
+                : (
+                    "Check UAV communications, mission process, "
+                    + "and native geofence."
+                );
+
+        setText(
+            "rc-card-uav1-reason",
+            uavReason
+        );
+
+        setText(
+            "rc-card-uav2-reason",
+            uavReason
+        );
+
+        setText(
+            "rc-card-uav3-reason",
+            uavReason
         );
 
         const overall =
@@ -8488,30 +10443,18 @@ async function rcClearHistory() {
 }
 
 
-refreshRoboCommand();
+startAsyncPoll(refreshRoboCommand, 750);
 
-setInterval(
-    refreshRoboCommand,
-    500
-);
+startAsyncPoll(refreshPorReadiness, 1500);
+startAsyncPoll(refreshPorEvidence, 1500);
 
-refreshPorReadiness();
-
-setInterval(
-    refreshPorReadiness,
-    1000
-);
+refreshPorEvidence();
 
 
 
 installTabHandlers();
 
-refresh();
-
-setInterval(
-    refresh,
-    500
-);
+startAsyncPoll(refresh, 500);
 
 
 /*
@@ -8874,6 +10817,30 @@ class RobotXDashboard(Node):
                     "message": "Invalid operator input",
                 })
 
+            current_deadman = bool(
+                data.get("deadman", False)
+            )
+
+            previous_deadman = getattr(
+                self,
+                "_debug_last_browser_deadman",
+                None,
+            )
+
+            if current_deadman != previous_deadman:
+
+                self._debug_last_browser_deadman = (
+                    current_deadman
+                )
+
+                self.get_logger().warning(
+                    "BROWSER_OPERATOR_INPUT "
+                    f"connected={bool(data.get('connected', False))} "
+                    f"deadman={current_deadman} "
+                    f"forward={data.get('forward', 0.0)} "
+                    f"yaw={data.get('yaw', 0.0)}"
+                )
+
             result = (
                 self.boat_client
                 .send_operator_input(data)
@@ -8949,6 +10916,99 @@ class RobotXDashboard(Node):
             endpoint="usv_reset_mission",
             view_func=reset_mission_response,
             methods=["POST"]
+        )
+
+
+        def download_usv_log(kind):
+            kind = str(kind or "").strip().lower()
+
+            if kind not in ("csv", "metadata"):
+                return jsonify({
+                    "success": False,
+                    "message": "kind must be csv or metadata",
+                }), 400
+
+            result = self.boat_client.command(
+                "get_log_file",
+                {"kind": kind},
+            )
+
+            if not result.get("success", False):
+                return jsonify({
+                    "success": False,
+                    "message": result.get(
+                        "message",
+                        "USV log download failed",
+                    ),
+                }), 404
+
+            encoded = result.get(
+                "file_content_b64"
+            )
+
+            if not encoded:
+                return jsonify({
+                    "success": False,
+                    "message": "USV returned no log payload",
+                }), 502
+
+            try:
+                content = base64.b64decode(
+                    encoded,
+                    validate=True,
+                )
+            except Exception as exc:
+                return jsonify({
+                    "success": False,
+                    "message": (
+                        "Invalid USV log payload: "
+                        + str(exc)
+                    ),
+                }), 502
+
+            filename = str(
+                result.get(
+                    "filename",
+                    (
+                        "mission_log.csv"
+                        if kind == "csv"
+                        else "mission_log_metadata.json"
+                    ),
+                )
+            )
+
+            mime_type = str(
+                result.get(
+                    "mime_type",
+                    (
+                        "text/csv"
+                        if kind == "csv"
+                        else "application/json"
+                    ),
+                )
+            )
+
+            response = Response(
+                content,
+                mimetype=mime_type,
+            )
+
+            response.headers[
+                "Content-Disposition"
+            ] = (
+                'attachment; filename="'
+                + filename.replace('"', "")
+                + '"'
+            )
+
+            return response
+
+
+        app.add_url_rule(
+            "/api/usv/log/download/<kind>",
+            endpoint="usv_log_download",
+            view_func=download_usv_log,
+            methods=["GET"],
         )
 
         # ----------------------------------------------------
@@ -11096,11 +13156,11 @@ def main(args=None):
 
     try:
 
-        app.run(
+        serve(
+            app,
             host="0.0.0.0",
             port=8080,
-            debug=False,
-            use_reloader=False
+            threads=8,
         )
 
     finally:

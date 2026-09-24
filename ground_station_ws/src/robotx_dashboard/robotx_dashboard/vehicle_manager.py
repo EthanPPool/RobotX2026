@@ -83,6 +83,16 @@ class VehicleManager:
 
                 "buoy_count": 0,
 
+                "visualization": {
+                    "version": 1,
+                    "cloud_points": [],
+                    "buoys": [],
+                    "gate": None,
+                    "local_pose": None,
+                    "trajectory": [],
+                    "attitude": {},
+                },
+
                 "gate_confidence": None,
                 "gate_x": None,
                 "gate_y": None,
