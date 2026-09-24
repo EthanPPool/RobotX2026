@@ -105,6 +105,12 @@ class BoatDashboardBridge(Node):
         self.operator_max_forward = 0.15
         self.operator_max_yaw = 0.15
 
+        # A fresh LB press requests MANUAL through the
+        # mavros_command_bridge. Once MANUAL is confirmed,
+        # arm the vehicle asynchronously.
+        self.operator_arm_lock = threading.Lock()
+        self.operator_arm_thread = None
+
         self.telemetry = {
             "connected": False,
             "armed": False,
@@ -1652,11 +1658,22 @@ class BoatDashboardBridge(Node):
             min(1.0, yaw),
         )
 
+        deadman_rising = False
+
         with self.lock:
+            previous_deadman = bool(
+                self.operator_deadman
+            )
+
             self.operator_connected = connected
 
             self.operator_deadman = bool(
                 connected and deadman
+            )
+
+            deadman_rising = bool(
+                self.operator_deadman
+                and not previous_deadman
             )
 
             if self.operator_deadman:
@@ -1676,6 +1693,137 @@ class BoatDashboardBridge(Node):
             self.operator_last_rx = (
                 time.monotonic()
             )
+
+        if deadman_rising:
+            self.start_operator_auto_arm()
+
+    def start_operator_auto_arm(self):
+        with self.operator_arm_lock:
+
+            if (
+                self.operator_arm_thread is not None
+                and self.operator_arm_thread.is_alive()
+            ):
+                return
+
+            self.operator_arm_thread = threading.Thread(
+                target=self.operator_auto_arm_worker,
+                daemon=True,
+                name="operator-auto-arm",
+            )
+
+            self.operator_arm_thread.start()
+
+    def operator_auto_arm_worker(self):
+        try:
+            deadline = time.monotonic() + 3.0
+
+            self.get_logger().warn(
+                "LB AUTO ARM: waiting for MANUAL"
+            )
+
+            while (
+                rclpy.ok()
+                and time.monotonic() < deadline
+            ):
+                now = time.monotonic()
+
+                with self.lock:
+                    fresh = bool(
+                        self.operator_connected
+                        and self.operator_deadman
+                        and self.operator_last_rx is not None
+                        and (
+                            now - self.operator_last_rx
+                        ) <= self.operator_timeout
+                    )
+
+                    mode = str(
+                        self.telemetry.get(
+                            "mode",
+                            "UNKNOWN",
+                        )
+                    ).upper()
+
+                    armed = bool(
+                        self.telemetry.get(
+                            "armed",
+                            False,
+                        )
+                    )
+
+                if not fresh:
+                    self.get_logger().warn(
+                        "LB AUTO ARM cancelled: "
+                        "deadman released or stale"
+                    )
+                    return
+
+                if armed:
+                    self.get_logger().info(
+                        "LB AUTO ARM: already armed"
+                    )
+                    return
+
+                if mode == "MANUAL":
+                    self.get_logger().warn(
+                        "LB AUTO ARM: MANUAL confirmed; "
+                        "requesting ARM"
+                    )
+
+                    ok, message = (
+                        self.call_arm_service(True)
+                    )
+
+                    if not ok:
+                        self.get_logger().error(
+                            "LB AUTO ARM failed: "
+                            + message
+                        )
+                        return
+
+                    confirm_deadline = (
+                        time.monotonic() + 1.5
+                    )
+
+                    while (
+                        rclpy.ok()
+                        and time.monotonic()
+                        < confirm_deadline
+                    ):
+                        with self.lock:
+                            confirmed = bool(
+                                self.telemetry.get(
+                                    "armed",
+                                    False,
+                                )
+                            )
+
+                        if confirmed:
+                            self.get_logger().warn(
+                                "LB AUTO ARM: "
+                                "ARMED in MANUAL"
+                            )
+                            return
+
+                        time.sleep(0.05)
+
+                    self.get_logger().error(
+                        "LB AUTO ARM: arm request "
+                        "sent but ARM was not confirmed"
+                    )
+                    return
+
+                time.sleep(0.05)
+
+            self.get_logger().error(
+                "LB AUTO ARM timed out "
+                "waiting for MANUAL"
+            )
+
+        finally:
+            with self.operator_arm_lock:
+                self.operator_arm_thread = None
 
     def publish_operator_command(self):
         now = time.monotonic()
