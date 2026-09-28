@@ -10648,14 +10648,14 @@ class RobotXDashboard(Node):
         self.uav_client.start()
 
         self.uuv_client = UuvClient(
-            "uav",
+            "uuv",
             self.vehicle_manager.update_vehicle,
             host="192.168.2.20",
             port=8770,
         )
 
         self.vehicle_manager.register_client(
-            "uav",
+            "uuv",
             self.uuv_client,
         )
 
@@ -10727,6 +10727,13 @@ class RobotXDashboard(Node):
                 self.get_logger().info(
                     "Monitoring UAV via TCP bridge "
                     "at 192.168.2.104:8766"
+                )
+                continue
+
+            if vehicle_id == "uuv":
+                self.get_logger().info(
+                    "Monitoring UUV via TCP bridge "
+                    "at 192.168.2.20:8770"
                 )
                 continue
 
