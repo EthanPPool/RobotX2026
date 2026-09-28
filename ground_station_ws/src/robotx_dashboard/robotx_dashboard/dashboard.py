@@ -31,6 +31,7 @@ from robotx_dashboard.vehicle_manager import VehicleManager
 from robotx_dashboard.clients.boat_client import BoatClient
 from robotx_dashboard.clients.boat_mavlink_client import BoatMavlinkClient
 from robotx_dashboard.clients.uav_client import UavClient
+from robotx_dashboard.clients.uuv_client import UuvClient
 from robotx_dashboard.clients.robocommand_client import RoboCommandClient
 
 
@@ -7377,6 +7378,10 @@ function updateVehicle(id, vehicle) {
     if (!vehiclePages[id]) {
         makeVehiclePage(id, vehicle);
     }
+    if (id === "uuv") {
+        updateUuvSensorPanel(vehicle);
+    }
+
 
 
     updateVehicleConsoleHeader(
@@ -10500,6 +10505,53 @@ setTimeout(
     1500
 );
 
+
+
+function ensureUuvSensorPanel(vehicle) {
+    const page = document.getElementById("uuv-page");
+    if (!page || document.getElementById("uuv-sensor-panel")) return;
+    const host = page.querySelector(".vehicle-layout") ||
+                 page.querySelector(".vehicle-console") ||
+                 page.querySelector(".console-grid") || page;
+    const card = document.createElement("div");
+    card.id = "uuv-sensor-panel";
+    card.className = "card";
+    card.innerHTML = `
+        <h2>UUV Sensors / Perception</h2>
+        <div class="row"><span>Depth</span><span class="value" id="uuv-depth">--</span></div>
+        <div class="row"><span>Pressure</span><span class="value" id="uuv-pressure">--</span></div>
+        <div class="row"><span>Attitude R/P/Y</span><span class="value" id="uuv-attitude">--</span></div>
+        <div class="row"><span>Camera</span><span class="value" id="uuv-camera">--</span></div>
+        <div class="row"><span>Camera FPS</span><span class="value" id="uuv-camera-fps">--</span></div>
+        <div class="row"><span>Detector</span><span class="value" id="uuv-detector">--</span></div>
+        <div class="row"><span>Inference FPS</span><span class="value" id="uuv-inference-fps">--</span></div>
+        <div class="row"><span>Detections</span><span class="value" id="uuv-detections">--</span></div>
+        <div class="row"><span>Top Detection</span><span class="value" id="uuv-top-detection">--</span></div>
+        <div class="row"><span>Autonomy</span><span class="value" id="uuv-autonomy-state">--</span></div>
+        <div class="row"><span>Safety</span><span class="value" id="uuv-safety-state">--</span></div>
+        <div class="row"><span>Safety Reason</span><span class="value" id="uuv-safety-reason">--</span></div>
+    `;
+    host.appendChild(card);
+}
+
+function updateUuvSensorPanel(vehicle) {
+    ensureUuvSensorPanel(vehicle);
+    const fmt = (v, digits=2) => (v === null || v === undefined) ? "--" : Number(v).toFixed(digits);
+    setText("uuv-depth", vehicle.depth_m == null ? "--" : `${fmt(vehicle.depth_m)} m`);
+    setText("uuv-pressure", vehicle.pressure_kpa == null ? "--" : `${fmt(vehicle.pressure_kpa, 1)} kPa`);
+    setText("uuv-attitude", `${fmt(vehicle.roll_deg,1)} / ${fmt(vehicle.pitch_deg,1)} / ${fmt(vehicle.yaw_deg,1)} deg`);
+    setText("uuv-camera", vehicle.camera_alive ? "LIVE" : "OFFLINE");
+    setText("uuv-camera-fps", vehicle.camera_fps == null ? "--" : `${fmt(vehicle.camera_fps,1)} fps`);
+    setText("uuv-detector", [vehicle.perception_backend, vehicle.perception_model].filter(Boolean).join(" / ") || "--");
+    setText("uuv-inference-fps", vehicle.perception_fps == null ? "--" : `${fmt(vehicle.perception_fps,1)} fps`);
+    setText("uuv-detections", vehicle.detection_count ?? 0);
+    const top = vehicle.top_detection_label ? `${vehicle.top_detection_label} (${fmt((vehicle.top_detection_confidence ?? 0)*100,1)}%)` : "--";
+    setText("uuv-top-detection", top);
+    setText("uuv-autonomy-state", vehicle.autonomy_state ?? vehicle.mission_state ?? "--");
+    setText("uuv-safety-state", vehicle.safety_state ?? "--");
+    setText("uuv-safety-reason", vehicle.safety_reason ?? "--");
+}
+
 </script>
 
 </body>
@@ -10594,6 +10646,20 @@ class RobotXDashboard(Node):
         )
 
         self.uav_client.start()
+
+        self.uuv_client = UuvClient(
+            "uav",
+            self.vehicle_manager.update_vehicle,
+            host="192.168.2.20",
+            port=8770,
+        )
+
+        self.vehicle_manager.register_client(
+            "uav",
+            self.uuv_client,
+        )
+
+        self.uuv_client.start()
 
         # Direct UAV autopilot management channel.
         #
@@ -10768,7 +10834,7 @@ class RobotXDashboard(Node):
 
         if hasattr(self, "uav_client"):
             self.uav_client.stop()
-
+            self.uuv_client.stop()
         if hasattr(self, "uav_mavlink_client"):
             self.uav_mavlink_client.stop()
 

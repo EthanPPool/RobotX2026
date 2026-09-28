@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+import json
+import time
+
+import rclpy
+from mavros_msgs.msg import State
+from rclpy.node import Node
+from std_msgs.msg import Bool, String
+
+
+class UuvSafetySupervisor(Node):
+    def __init__(self):
+        super().__init__('uuv_safety_supervisor')
+        self.allowed_modes = {x.strip().upper() for x in str(self.declare_parameter('allowed_modes', 'GUIDED').value).split(',') if x.strip()}
+        self.state_timeout = float(self.declare_parameter('state_timeout', 1.0).value)
+        self.sensor_timeout = float(self.declare_parameter('sensor_timeout', 2.0).value)
+        self.require_camera = bool(self.declare_parameter('require_camera', True).value)
+        self.require_perception = bool(self.declare_parameter('require_perception', True).value)
+
+        self.state = None
+        self.state_rx = None
+        self.camera = {}; self.camera_rx = None
+        self.perception = {}; self.perception_rx = None
+
+        self.auth_pub = self.create_publisher(Bool, '/uuv/safety/authorized', 10)
+        self.status_pub = self.create_publisher(String, '/uuv/safety/status', 10)
+        self.create_subscription(State, '/uuv/mavros/state', self._state_cb, 10)
+        self.create_subscription(String, '/uuv/camera/status', self._camera_cb, 10)
+        self.create_subscription(String, '/uuv/perception/status', self._perception_cb, 10)
+        self.timer = self.create_timer(0.1, self._evaluate)
+
+    def _state_cb(self, msg):
+        self.state = msg; self.state_rx = time.monotonic()
+
+    @staticmethod
+    def _decode(msg):
+        try:
+            obj = json.loads(msg.data)
+            return obj if isinstance(obj, dict) else {}
+        except Exception:
+            return {}
+
+    def _camera_cb(self, msg):
+        self.camera = self._decode(msg); self.camera_rx = time.monotonic()
+
+    def _perception_cb(self, msg):
+        self.perception = self._decode(msg); self.perception_rx = time.monotonic()
+
+    def _evaluate(self):
+        now = time.monotonic()
+        reasons = []
+        state_fresh = self.state_rx is not None and now - self.state_rx <= self.state_timeout
+        if not state_fresh:
+            reasons.append('flight-controller state stale')
+        elif not bool(self.state.connected):
+            reasons.append('MAVROS not connected')
+        elif not bool(self.state.armed):
+            reasons.append('vehicle not armed')
+        elif str(self.state.mode).upper() not in self.allowed_modes:
+            reasons.append(f"mode {self.state.mode} not allowed")
+
+        if self.require_camera:
+            fresh = self.camera_rx is not None and now - self.camera_rx <= self.sensor_timeout
+            if not fresh or not bool(self.camera.get('camera_alive')):
+                reasons.append('camera unavailable')
+        if self.require_perception:
+            fresh = self.perception_rx is not None and now - self.perception_rx <= self.sensor_timeout
+            if not fresh or not bool(self.perception.get('perception_alive')):
+                reasons.append('perception unavailable')
+
+        authorized = len(reasons) == 0
+        a = Bool(); a.data = authorized; self.auth_pub.publish(a)
+        status = {
+            'authorized': authorized,
+            'safety_state': 'AUTHORIZED' if authorized else 'BLOCKED',
+            'safety_reason': 'ready' if authorized else '; '.join(reasons),
+            'mode_allowed': bool(self.state is not None and str(self.state.mode).upper() in self.allowed_modes),
+            'prearm_ready': bool(state_fresh and self.state is not None and self.state.connected and not reasons[:1]),
+        }
+        out = String(); out.data = json.dumps(status, separators=(',', ':')); self.status_pub.publish(out)
+
+
+def main(args=None):
+    rclpy.init(args=args); node = UuvSafetySupervisor()
+    try: rclpy.spin(node)
+    except KeyboardInterrupt: pass
+    finally: node.destroy_node(); rclpy.shutdown()
+
+
+if __name__ == '__main__': main()

@@ -1,0 +1,9 @@
+build/
+install/
+log/
+*.engine
+*.onnx
+*.pt
+__pycache__/
+*.pyc
+.env
