@@ -22,7 +22,8 @@ setup(
     license='TODO',
     entry_points={
         'console_scripts': [
-            'mavros_command_bridge = boat_vehicle.mavros_command_bridge:main'
+            'mavros_command_bridge = boat_vehicle.mavros_command_bridge:main',
+            'esp32_status_bridge = boat_vehicle.esp32_status_bridge:main',
         ],
     },
 )

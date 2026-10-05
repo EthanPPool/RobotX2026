@@ -164,21 +164,21 @@ class BoatDashboardBridge(Node):
             NavSatFix,
             "/mavros/global_position/global",
             self.gps_callback,
-            10,
+            qos_profile_sensor_data,
         )
 
         self.create_subscription(
             Imu,
             "/mavros/imu/data",
             self.imu_callback,
-            10,
+            qos_profile_sensor_data,
         )
 
         self.create_subscription(
             BatteryState,
             "/mavros/battery",
             self.battery_callback,
-            10,
+            qos_profile_sensor_data,
         )
 
         self.create_subscription(
