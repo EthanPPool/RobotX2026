@@ -1,35 +1,22 @@
-This node is a simple closed-loop guidance controller. Its job is to take a target point expressed relative to the boat and convert that target into two commands:
+# boat_control
 
-forward velocity
-yaw rate
+`boat_control` is intentionally mission-agnostic.
 
-It does not directly control thrusters. It publishes a desired body-motion command on /control/cmd_vel
+The production Task 1 interface is:
 
-The pipeline can be visualized:
+```text
+/mission/target (boat_interfaces/msg/NavigationTarget)
+        -> target_controller
+        -> /control/cmd_vel (geometry_msgs/msg/TwistStamped)
+```
 
-NavigationTarget ->
- target_controller ->
-[TwistStamped
-linear.x  = forward speed
-angular.z = turning rate] ->
-/control/cmd_vel
+The controller owns only body-frame guidance conversion:
 
-The controller is always asking:
-1. Where is the target relative to the boat?
-2. How fast should I move forward and turn to point toward it?
+- validate target freshness and finiteness;
+- compute heading error from the base_link target;
+- apply proportional yaw control with a configured yaw-rate limit;
+- allow forward motion only inside `forward_angle_limit_deg`;
+- clamp requested forward speed to `max_forward_speed`;
+- fail to zero velocity for stale, stopped, invalid, or behind-vehicle targets.
 
-x-axis: Longitudinal axis, with +x being the space in front of the boat
-
-y-axis: Transversal axis, +y being Portside and, -y being the Starboard side
-
-z-axis: Axial axis, +z being up
-
-class TargetController(Node):
-
-  """Convert a base_link-relative point target into body-frame velocity commands."""
-
-aka 
-
-Input: point target relative to the boat
-
-Output: forward speed + yaw rate
+Mission sequencing, gate geometry, gate counting, and gate-passage detection belong to `boat_mission`. MAVROS modes, propulsion authority, E-stop, operator takeover, and command deadman behavior belong to `boat_vehicle`.

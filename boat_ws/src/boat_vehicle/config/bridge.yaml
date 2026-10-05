@@ -14,6 +14,8 @@ mavros_command_bridge:
 
     set_mode_service: "/mavros/set_mode"
     stop_mode: "HOLD"
+    mission_complete_mode: "LOITER"
+    mission_complete_mode_retry_period: 0.50
 
     autonomy_enabled: false
     software_estop: true

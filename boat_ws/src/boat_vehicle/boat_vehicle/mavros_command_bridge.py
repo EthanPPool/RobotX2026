@@ -157,6 +157,20 @@ class MavrosCommandBridge(Node):
             ).value
         ).upper()
 
+        self.mission_complete_mode = str(
+            self.declare_parameter(
+                'mission_complete_mode',
+                'LOITER'
+            ).value
+        ).upper()
+
+        self.mission_complete_mode_retry_period = float(
+            self.declare_parameter(
+                'mission_complete_mode_retry_period',
+                0.50
+            ).value
+        )
+
         self.declare_parameter(
             'autonomy_enabled',
             False
@@ -277,6 +291,10 @@ class MavrosCommandBridge(Node):
 
         self.autonomy_mode_future = None
         self.last_autonomy_mode_request_monotonic = 0.0
+
+        self.mission_complete_mode_required = False
+        self.mission_complete_mode_future = None
+        self.last_mission_complete_mode_request_monotonic = 0.0
 
         self.cmd_pub = self.create_publisher(
             TwistStamped,
@@ -549,6 +567,12 @@ class MavrosCommandBridge(Node):
         ):
             return
 
+        if (
+            self.mission_complete_mode_future is not None
+            and not self.mission_complete_mode_future.done()
+        ):
+            return
+
         now = time.monotonic()
 
         if (
@@ -586,6 +610,7 @@ class MavrosCommandBridge(Node):
         # autonomy, neutralizes GUIDED velocity, and requests
         # MANUAL regardless of the current ArduRover mode.
         self.operator_rearm_required = False
+        self.mission_complete_mode_required = False
 
         if bool(
             self.get_parameter(
@@ -1015,20 +1040,20 @@ class MavrosCommandBridge(Node):
             return
 
         self.get_logger().warning(
-            'MISSION COMPLETE: '
-            'stopping GUIDED velocity authority; '
-            'follower will request LOITER'
+            'MISSION COMPLETE: stopping GUIDED velocity authority and '
+            f'requesting {self.mission_complete_mode}'
         )
 
         self.publish_velocity_neutral()
         self.clear_stored_command()
-
         self.set_autonomy(False)
 
-        # Do not fight the follower's final LOITER request with HOLD.
+        # Mission completion is not a safety HOLD. The vehicle layer owns
+        # the final position-holding mode formerly requested by the follower.
         self.hold_required = False
-
+        self.mission_complete_mode_required = True
         self.last_stop_reason = 'mission complete'
+        self.request_mission_complete_mode(force=True)
 
     def command_callback(self, msg):
         self.last_command = msg
@@ -1042,6 +1067,16 @@ class MavrosCommandBridge(Node):
         mode = str(
             msg.mode
         ).upper()
+
+        if (
+            self.mission_complete_mode_required
+            and mode == self.mission_complete_mode
+        ):
+            self.mission_complete_mode_required = False
+            self.get_logger().warning(
+                'MISSION COMPLETE MODE CONFIRMED: '
+                f'{self.mission_complete_mode}'
+            )
 
         if (
             self.hold_required
@@ -1175,6 +1210,75 @@ class MavrosCommandBridge(Node):
         finally:
             self.autonomy_mode_future = None
 
+
+    def mission_complete_mode_done(self, future):
+        try:
+            result = future.result()
+            if result is None or not result.mode_sent:
+                self.get_logger().error(
+                    f'{self.mission_complete_mode} request rejected at '
+                    'mission completion'
+                )
+            else:
+                self.get_logger().warning(
+                    f'{self.mission_complete_mode} request sent at '
+                    'mission completion'
+                )
+        except Exception as exc:
+            self.get_logger().error(
+                f'{self.mission_complete_mode} request error at mission '
+                f'completion: {exc}'
+            )
+        finally:
+            self.mission_complete_mode_future = None
+
+    def request_mission_complete_mode(self, force=False):
+        if not self.mission_complete_mode_required:
+            return
+
+        state = self.vehicle_state
+        if state is None or not state.connected:
+            return
+
+        mode = str(state.mode).upper()
+        if mode == self.mission_complete_mode:
+            self.mission_complete_mode_required = False
+            return
+
+        if (
+            self.mission_complete_mode_future is not None
+            and not self.mission_complete_mode_future.done()
+        ):
+            return
+
+        # Never overlap mode requests from other authority paths.
+        for future in (
+            self.hold_future,
+            self.operator_mode_future,
+            self.autonomy_mode_future,
+        ):
+            if future is not None and not future.done():
+                return
+
+        now = time.monotonic()
+        if (
+            not force
+            and now - self.last_mission_complete_mode_request_monotonic
+            < self.mission_complete_mode_retry_period
+        ):
+            return
+
+        if not self.mode_client.service_is_ready():
+            return
+
+        self.last_mission_complete_mode_request_monotonic = now
+        request = SetMode.Request()
+        request.base_mode = 0
+        request.custom_mode = self.mission_complete_mode
+        self.mission_complete_mode_future = self.mode_client.call_async(request)
+        self.mission_complete_mode_future.add_done_callback(
+            self.mission_complete_mode_done
+        )
 
     def request_autonomy_mode(self, force=False):
         if (
@@ -1472,6 +1576,9 @@ class MavrosCommandBridge(Node):
         # ---------------------------------------------------------
         # NON-OPERATOR SAFETY
         # ---------------------------------------------------------
+        if self.mission_complete_mode_required:
+            return 'MISSION_COMPLETE_MODE_PENDING'
+
         if software_estop:
             return 'SOFTWARE_ESTOP'
 
@@ -1727,6 +1834,8 @@ class MavrosCommandBridge(Node):
         self.publish_software_stop_state()
 
         if active:
+            self.mission_complete_mode_required = False
+
             # Overwrite any previously accepted GUIDED velocity before
             # waiting for the next timer cycle or a HOLD acknowledgement.
             self.publish_velocity_neutral()
@@ -1792,6 +1901,8 @@ class MavrosCommandBridge(Node):
             )
 
             return response
+
+        self.mission_complete_mode_required = False
 
         # Operator authority always wins over an autonomy-enable
         # request.
@@ -2071,6 +2182,15 @@ class MavrosCommandBridge(Node):
             self.request_hold(
                 self.last_stop_reason
             )
+            return
+
+        # ====================================================
+        # MISSION-COMPLETE HOLD MODE
+        # ====================================================
+
+        if self.mission_complete_mode_required:
+            self.publish_velocity_neutral()
+            self.request_mission_complete_mode()
             return
 
         # ====================================================

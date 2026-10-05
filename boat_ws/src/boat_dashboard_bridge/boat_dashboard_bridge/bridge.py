@@ -270,7 +270,7 @@ class BoatDashboardBridge(Node):
 
         self.reset_client = self.create_client(
             Trigger,
-            "/control/reset_mission",
+            "/mission/reset",
         )
 
         self.logger_reset_client = self.create_client(

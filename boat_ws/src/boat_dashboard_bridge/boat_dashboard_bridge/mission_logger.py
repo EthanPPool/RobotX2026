@@ -335,7 +335,8 @@ class MissionLogger(Node):
         self._subscribe(NavSatFix, "/mavros/global_position/global", self.gps_callback, True)
         self._subscribe(Gate, "/perception/gate", self.gate_callback)
         self._subscribe(String, "/mission/state", self.mission_callback)
-        self._subscribe(String, "/control/diagnostics", self.follower_diag_callback)
+        self._subscribe(String, "/mission/diagnostics", self.mission_diag_callback)
+        self._subscribe(String, "/control/diagnostics", self.control_diag_callback)
         self._subscribe(TwistStamped, "/control/cmd_vel", self.follower_cmd_callback)
         self._subscribe(String, "/vehicle/control_diagnostics", self.bridge_diag_callback)
         self._subscribe(
@@ -403,6 +404,14 @@ class MissionLogger(Node):
                 "receipt": now_mono,
                 "sequence": self.sequence,
             }
+
+    def merge_cache(self, name, values, msg=None):
+        with self.lock:
+            merged = dict(
+                self.samples.get(name, {}).get("values", {})
+            )
+            merged.update(values)
+        self.cache(name, merged, msg)
 
     def state_callback(self, msg):
         values = {
@@ -551,7 +560,7 @@ class MissionLogger(Node):
         if isinstance(data, dict):
             self.cache(sample_name, data, msg)
 
-    def follower_diag_callback(self, msg):
+    def mission_diag_callback(self, msg):
         try:
             data = json.loads(msg.data)
         except (TypeError, json.JSONDecodeError):
@@ -561,23 +570,35 @@ class MissionLogger(Node):
             return
 
         renames = {
-            "mission_phase":
-                "controller_phase",
-            "current_gate":
-                "controller_current_gate",
-            "mission_complete":
-                "controller_mission_complete",
-            "follower_linear_x":
-                "diagnostic_follower_linear_x",
-            "follower_angular_z":
-                "diagnostic_follower_angular_z",
+            "mission_phase": "controller_phase",
+            "current_gate": "controller_current_gate",
+            "mission_complete": "controller_mission_complete",
+            "mission_enabled": "follower_enabled",
         }
-
         for source, destination in renames.items():
             if source in data:
                 data[destination] = data.pop(source)
 
-        self.cache("follower_diag", data, msg)
+        self.merge_cache("follower_diag", data, msg)
+
+    def control_diag_callback(self, msg):
+        try:
+            data = json.loads(msg.data)
+        except (TypeError, json.JSONDecodeError):
+            return
+
+        if not isinstance(data, dict):
+            return
+
+        renames = {
+            "command_linear_x": "diagnostic_follower_linear_x",
+            "command_angular_z": "diagnostic_follower_angular_z",
+        }
+        for source, destination in renames.items():
+            if source in data:
+                data[destination] = data.pop(source)
+
+        self.merge_cache("follower_diag", data, msg)
 
     def bridge_diag_callback(self, msg):
         try:
