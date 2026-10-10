@@ -17,11 +17,15 @@ class OakRgbNode(Node):
         self.declare_parameter('width', 640)
         self.declare_parameter('height', 400)
         self.declare_parameter('fps', 15.0)
+        self.declare_parameter('device_id', '')
 
         self.frame_id = self.get_parameter('frame_id').value
         self.width = self.get_parameter('width').value
         self.height = self.get_parameter('height').value
         self.fps = self.get_parameter('fps').value
+        device_id = str(self.get_parameter('device_id').value).strip()
+        if not device_id:
+            raise ValueError('Set device_id to the FIRST OAK-D DeviceID/MXID; dual-camera discovery order is ambiguous')
 
         self.publisher = self.create_publisher(
             Image,
@@ -31,7 +35,8 @@ class OakRgbNode(Node):
 
         self.bridge = CvBridge()
 
-        self.pipeline = dai.Pipeline()
+        self.device = dai.Device(dai.DeviceInfo(device_id))
+        self.pipeline = dai.Pipeline(self.device)
 
         self.camera = self.pipeline.create(dai.node.Camera).build(
             dai.CameraBoardSocket.CAM_A
@@ -85,6 +90,7 @@ class OakRgbNode(Node):
             self.pipeline.stop()
         except Exception:
             pass
+        self.device.close()
 
         super().destroy_node()
 

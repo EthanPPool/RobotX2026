@@ -1,0 +1,18 @@
+/**:
+  ros__parameters:
+    map_frame: robotx_map
+    # Set on every vehicle from the SAME surveyed WGS84 water datum.
+    datum_configured: false
+    origin_latitude: 0.0
+    origin_longitude: 0.0
+    water_altitude: 0.0
+    goal_x: 30.0
+    goal_y: 0.0
+    bounds: [-10.0, -20.0, 60.0, 20.0]
+    resolution: 0.5
+    clearance: 1.0
+    desired_speed: 0.12
+    map_timeout: 3.0
+    local_sensor_timeout: 0.5
+    survey_ttl: 60.0
+    replan_period: 1.0

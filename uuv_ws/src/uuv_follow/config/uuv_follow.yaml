@@ -1,0 +1,20 @@
+/**:
+  ros__parameters:
+    map_frame: robotx_map
+    # Set on every vehicle from the SAME surveyed WGS84 water datum.
+    datum_configured: false
+    origin_latitude: 0.0
+    origin_longitude: 0.0
+    water_altitude: 0.0
+    usv_pose_topic: /boat/coordination/odometry
+    uuv_pose_topic: /uuv/coordination/odometry
+    follow_distance: 3.0
+    follow_depth: 1.5
+    max_depth: 5.0
+    max_xy_speed: 0.4
+    max_z_speed: 0.2
+    max_pose_variance: 1.0
+    require_frame_check: true
+    mavros_velocity_node: /uuv/mavros/setpoint_velocity
+# The existing UUV bridge consumes /uuv/control/cmd_vel from velocity_guard.
+# MAVROS setpoint_velocity MUST be configured as LOCAL_NED (ROS input = ENU).

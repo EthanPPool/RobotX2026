@@ -1,0 +1,15 @@
+/**:
+  ros__parameters:
+    map_frame: robotx_map
+    # Set on every vehicle from the SAME surveyed WGS84 water datum.
+    datum_configured: false
+    origin_latitude: 0.0
+    origin_longitude: 0.0
+    water_altitude: 0.0
+    vehicle: uav
+    body_frame: uav/base_link
+    output_topic: /uav/coordination/odometry
+    gps_topic: /uav/mavros/global_position/global
+    imu_topic: /uav/mavros/imu/data
+    max_gps_variance: 1.0
+    range_topic: /uav/downward/range

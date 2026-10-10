@@ -1,0 +1,27 @@
+name: UAV USV UUV coordination checks
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  algorithms-and-adapters:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install algorithm and OAK API dependencies
+        run: python3 -m pip install numpy opencv-python-headless pytest -r scripts/requirements_uav_oak.txt
+      - name: Check adapters, geometry, camera calibration and fault behavior
+        env:
+          PYTHONPATH: coordination_ws/src/robotx_coordination
+        run: python3 -m pytest tests/coordination -q
+      - name: Execute 100 synthetic coordinated missions
+        run: python3 tests/coordination/run_coordinated.py --runs 100 --output coordination_test_results
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coordination-trials
+          path: coordination_test_results
