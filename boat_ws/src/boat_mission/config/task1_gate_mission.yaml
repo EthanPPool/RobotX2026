@@ -1,5 +1,7 @@
 task1_gate_mission:
   ros__parameters:
+    gates_topic: "/perception/gates"
+    use_gate_candidates: true
     gate_topic: "/perception/gate"
     target_topic: "/mission/target"
     state_topic: "/mission/state"
@@ -21,3 +23,10 @@ task1_gate_mission:
     pass_clear_distance: 1.0
     local_pose_timeout: 1.50
     pass_edge_margin: 0.0
+
+    # Fixed-frame gate identity; higher confidence elsewhere cannot steal it.
+    gate_association_distance: 0.80
+    gate_marker_association_distance: 1.00
+    gate_width_association_tolerance: 0.40
+    gate_acquisition_angle_deg: 45.0
+    gate_measurement_timeout: 2.50

@@ -39,6 +39,8 @@ def generate_launch_description():
 
                 # Production Task 1 topics.
                 'objects_topic': '/perception/objects',
+                'motion_compensation': True,
+                'local_position_topic': '/mavros/local_position/pose',
                 'markers_topic': '/perception/object_markers',
 
                 # Keep engineering outputs available while testing.
@@ -49,7 +51,9 @@ def generate_launch_description():
 
                 # Temporal persistence values from our latest revision.
                 'max_track_misses': 7,
-                'publish_misses': 4,
+                # Keep tracks internally for reacquisition, but never stamp a
+                # predicted, unobserved buoy as a fresh gate measurement.
+                'publish_misses': 0,
                 'generic_confirm_hits': 3,
                 'generic_release_bad_frames': 6,
                 'generic_confidence_alpha': 0.60,

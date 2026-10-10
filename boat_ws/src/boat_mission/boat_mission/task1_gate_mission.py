@@ -19,7 +19,9 @@ from rclpy.qos import qos_profile_sensor_data
 from std_msgs.msg import Float64, String
 from std_srvs.srv import SetBool, Trigger
 
-from boat_interfaces.msg import Gate, NavigationTarget
+from boat_interfaces.msg import Gate, GateArray, NavigationTarget
+from boat_perception.pose_history import PoseHistory, stamp_seconds, to_map
+from boat_mission.gate_selection import GateGeometry, GateSelector
 
 
 class MissionPhase(Enum):
@@ -44,6 +46,23 @@ class Task1GateMission(Node):
         self.gate_topic = self.declare_parameter(
             'gate_topic', '/perception/gate'
         ).value
+        self.gates_topic = self.declare_parameter('gates_topic', '/perception/gates').value
+        self.use_gate_candidates = bool(self.declare_parameter('use_gate_candidates', True).value)
+        self.gate_measurement_timeout = float(self.declare_parameter('gate_measurement_timeout', 2.5).value)
+        center_limit = float(self.declare_parameter('gate_association_distance', 0.8).value)
+        marker_limit = float(self.declare_parameter('gate_marker_association_distance', 1.0).value)
+        width_limit = float(self.declare_parameter('gate_width_association_tolerance', 0.4).value)
+        bearing_limit = float(self.declare_parameter('gate_acquisition_angle_deg', 45.0).value)
+        if (not all(math.isfinite(v) for v in (self.gate_measurement_timeout,
+                center_limit, marker_limit, width_limit, bearing_limit)) or
+                min(self.gate_measurement_timeout, center_limit, marker_limit, width_limit) <= 0 or
+                not 0 < bearing_limit < 90):
+            raise ValueError('Invalid gate selection or freshness parameters')
+        self.gate_selector = GateSelector(center_limit, marker_limit, width_limit, bearing_limit)
+        self.pose_history = PoseHistory()
+        self.selected_measurement_stamp = None
+        self.gate_candidate_count = 0
+        self.gate_selection_reason = 'NO_CANDIDATES'
         self.target_topic = self.declare_parameter(
             'target_topic', '/mission/target'
         ).value
@@ -171,7 +190,10 @@ class Task1GateMission(Node):
             Float64, '/task1/debug/gate_signed_distance', 10
         )
 
-        self.create_subscription(Gate, self.gate_topic, self.gate_callback, 10)
+        if self.use_gate_candidates:
+            self.create_subscription(GateArray, self.gates_topic, self.gates_callback, 10)
+        else:
+            self.create_subscription(Gate, self.gate_topic, self.gate_callback, 10)
         self.create_subscription(
             State,
             self.vehicle_state_topic,
@@ -199,6 +221,8 @@ class Task1GateMission(Node):
         )
 
     def reset_mission(self):
+        self.gate_selector.reset()
+        self.selected_measurement_stamp = None
         self.gates_passed = 0
         self.current_gate = 1
         self.mission_complete = False
@@ -266,7 +290,7 @@ class Task1GateMission(Node):
         )
         return (
             all(math.isfinite(value) for value in values)
-            and confidence >= self.min_gate_confidence
+            and self.min_gate_confidence <= confidence <= 1.0
             and float(msg.center.x) > 0.0
         )
 
@@ -274,6 +298,10 @@ class Task1GateMission(Node):
         self.vehicle_state = msg
 
     def local_position_callback(self, msg):
+        q = msg.pose.orientation
+        if not all(math.isfinite(v) for v in (msg.pose.position.x, msg.pose.position.y,
+                                              q.x, q.y, q.z, q.w)):
+            return
         self.local_x = float(msg.pose.position.x)
         self.local_y = float(msg.pose.position.y)
 
@@ -282,6 +310,8 @@ class Task1GateMission(Node):
         cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
         self.local_yaw = math.atan2(siny_cosp, cosy_cosp)
         self.local_pose_time = self.get_clock().now()
+        self.pose_history.add(stamp_seconds(msg.header.stamp), self.local_x,
+                              self.local_y, self.local_yaw)
 
     def local_pose_is_available(self):
         return (
@@ -331,21 +361,23 @@ class Task1GateMission(Node):
         )
 
     def clear_tracked_gate_geometry(self):
+        self.gate_selector.release()
+        self.selected_measurement_stamp = None
         self.tracked_port = None
         self.tracked_starboard = None
         self.tracked_midpoint = None
         self.tracked_gate_measurement_time = None
 
-    def update_tracked_gate_geometry(self, gate):
+    def update_tracked_gate_geometry(self, gate, measurement_pose=None):
         if not self.local_pose_is_fresh():
             return False
 
-        port_map = self.body_point_to_map(
-            float(gate.left_marker.x), float(gate.left_marker.y)
-        )
-        starboard_map = self.body_point_to_map(
-            float(gate.right_marker.x), float(gate.right_marker.y)
-        )
+        if measurement_pose is None:
+            measurement_pose = self.pose_history.at(stamp_seconds(gate.header.stamp))
+        if measurement_pose is None:
+            return False
+        port_map = to_map((float(gate.left_marker.x), float(gate.left_marker.y)), measurement_pose)
+        starboard_map = to_map((float(gate.right_marker.x), float(gate.right_marker.y)), measurement_pose)
         if port_map is None or starboard_map is None:
             return False
 
@@ -514,25 +546,59 @@ class Task1GateMission(Node):
         )
 
     def gate_callback(self, msg):
+        # Legacy input is explicit opt-in; both paths enforce mission identity.
+        array = GateArray()
+        array.header = msg.header
+        array.gates = [msg]
+        self.gates_callback(array)
+
+    def gates_callback(self, array):
         if not self.enabled or self.mission_complete:
             return
         if self.phase == MissionPhase.PASS_GATE:
             return
-        if not self.gate_is_valid(msg):
+        self.gate_candidate_count = len(array.gates)
+        if not self.local_pose_is_fresh() or array.header.frame_id != 'base_link':
+            self.gate_selection_reason = 'POSE_OR_FRAME_UNAVAILABLE'
             return
-
-        measurement_stamp = (
-            int(msg.header.stamp.sec),
-            int(msg.header.stamp.nanosec),
-        )
-        if measurement_stamp == self.last_gate_measurement_stamp:
+        stamp = stamp_seconds(array.header.stamp)
+        now = self.get_clock().now().nanoseconds / 1e9
+        if stamp <= 0 or not 0 <= now - stamp <= self.gate_measurement_timeout:
+            self.gate_selection_reason = 'STALE_MEASUREMENT'
             return
-        self.last_gate_measurement_stamp = measurement_stamp
+        if self.selected_measurement_stamp is not None and stamp <= self.selected_measurement_stamp:
+            return
+        pose = self.pose_history.at(stamp)
+        if pose is None:
+            self.gate_selection_reason = 'MEASUREMENT_POSE_UNAVAILABLE'
+            return
+        geometries, messages = [], {}
+        for msg in array.gates:
+            if (not self.gate_is_valid(msg) or msg.header.frame_id != 'base_link' or
+                    stamp_seconds(msg.header.stamp) != stamp):
+                continue
+            port = to_map((float(msg.left_marker.x), float(msg.left_marker.y)), pose)
+            starboard = to_map((float(msg.right_marker.x), float(msg.right_marker.y)), pose)
+            geometry = GateGeometry(port, starboard, float(msg.confidence), stamp)
+            if (not all(math.isfinite(v) for v in (*port, *starboard, msg.width)) or
+                    geometry.width <= 0 or abs(geometry.width - msg.width) > 0.25):
+                continue
+            geometries.append(geometry)
+            messages[id(geometry)] = msg
+        chosen = self.gate_selector.choose(geometries, (self.local_x, self.local_y, self.local_yaw))
+        if chosen is None:
+            self.gate_selection_reason = ('LOCKED_GATE_NOT_OBSERVED' if
+                self.gate_selector.anchor is not None else 'NO_ELIGIBLE_GATE')
+            return
+        msg = messages[id(chosen)]
+        self.gate_selection_reason = 'MATCHED_LOCKED_GATE'
+        self.last_gate_measurement_stamp = (int(array.header.stamp.sec), int(array.header.stamp.nanosec))
+        self.selected_measurement_stamp = stamp
 
         self.last_gate = msg
         self.last_gate_time = self.get_clock().now()
 
-        if not self.update_tracked_gate_geometry(msg):
+        if not self.update_tracked_gate_geometry(msg, pose):
             return
 
         if self.phase == MissionPhase.WAIT_GATE:
@@ -546,6 +612,10 @@ class Task1GateMission(Node):
 
     def finish_current_gate(self, reason):
         finished_gate = self.current_gate
+        geometry = (None if self.saved_port is None or self.saved_starboard is None else
+                    GateGeometry(self.saved_port, self.saved_starboard, 1.0,
+                                 self.selected_measurement_stamp or 0.0))
+        self.gate_selector.complete(geometry)
         self.gates_passed += 1
         self.last_gate = None
         self.last_gate_time = None
@@ -751,6 +821,11 @@ class Task1GateMission(Node):
                 'local_pose_age_s': self.local_pose_age(),
                 'local_pose_fresh': bool(self.local_pose_is_fresh()),
                 'tracked_gate_measurement_age_s': tracked_age,
+                'gate_candidate_count': self.gate_candidate_count,
+                'gate_selection_reason': self.gate_selection_reason,
+                'gate_identity_locked': (self.gate_selector.anchor is not None or
+                                         self.phase == MissionPhase.PASS_GATE),
+                'completed_gate_exclusions': len(self.gate_selector.passed),
                 'gate_map_range_m': gate_map_range,
                 'gate_signed_distance_m': signed_distance,
                 'gate_lateral_offset_m': lateral_offset,
@@ -902,6 +977,14 @@ class Task1GateMission(Node):
                     f'WAIT_GATE_{self.current_gate}: no remembered gate geometry'
                 )
                 self.publish_stop('TRACK_GEOMETRY_MISSING')
+                return
+
+            # Preserve identity during a brief gap, but do not keep approaching
+            # a remembered gate indefinitely when its measurements disappear.
+            age = (None if self.selected_measurement_stamp is None else
+                   self.get_clock().now().nanoseconds / 1e9 - self.selected_measurement_stamp)
+            if age is None or not 0 <= age <= self.gate_measurement_timeout:
+                self.publish_stop('TRACK_GATE_MEASUREMENT_STALE')
                 return
 
             if not self.local_pose_is_fresh():

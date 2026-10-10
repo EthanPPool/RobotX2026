@@ -10,6 +10,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/DetectedObject.msg"
   "msg/DetectedObjectArray.msg"
   "msg/Gate.msg"
+  "msg/GateArray.msg"
   "msg/NavigationTarget.msg"
   "srv/ResetMissionLog.srv"
   DEPENDENCIES geometry_msgs std_msgs

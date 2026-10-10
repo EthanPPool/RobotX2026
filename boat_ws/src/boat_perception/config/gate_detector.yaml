@@ -1,6 +1,7 @@
 gate_detector:
   ros__parameters:
     objects_topic: "/perception/objects"
+    gates_topic: "/perception/gates"
     gate_topic: "/perception/gate"
     marker_topic: "/perception/gate_markers"
 
@@ -15,24 +16,16 @@ gate_detector:
 
     # Accept a real gate while the boat is yawed relative to it.
     max_gate_skew_deg: 55.0
-    max_depth_difference: 0.60
-    min_lateral_fraction: 0.88
 
     min_center_x: 0.75
     max_center_x: 10.0
     min_gate_confidence: 0.72
 
-    # Multi-frame confirmation and moving-body-frame association.
+    # Confirm each marker pair separately, on distinct sensor timestamps.
     confirm_hits: 2
-    max_misses: 6
-
-    # Gate state estimator output. Real 3D measurements arrive near 1.2 Hz;
-    # publish the latest confirmed measurement at control rate, but stop
-    # after a bounded gap instead of holding stale data indefinitely.
     publish_rate: 10.0
     hold_timeout: 1.80
-
-    center_association_distance: 1.00
-    center_association_per_meter: 0.05
-    width_association_tolerance: 1.00
-    track_alpha: 0.55
+    max_buoys: 64
+    max_gate_candidates: 64
+    # Enable only when a color sensor supplies reliable red/green labels.
+    require_red_green: false
