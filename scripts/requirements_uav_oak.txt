@@ -1,0 +1,2 @@
+# DepthAI v3 API verified against this wheel. Install in the Pi ROS Python env.
+depthai==3.11.0

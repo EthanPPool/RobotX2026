@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="3"><name>robotx_coordination_sim</name><version>0.1.0</version>
+<description>Isolated UAV USV UUV software integration fixture</description>
+<maintainer email="robotx@localhost">RobotX Team</maintainer><license>MIT</license>
+<buildtool_depend>ament_python</buildtool_depend>
+<exec_depend>robotx_coordination</exec_depend>
+<exec_depend>uav_mapping</exec_depend>
+<exec_depend>uuv_follow</exec_depend>
+<exec_depend>boat_route_navigation</exec_depend>
+<exec_depend>boat_interfaces</exec_depend>
+<exec_depend>boat_control</exec_depend>
+<exec_depend>boat_vehicle</exec_depend>
+<exec_depend>rclpy</exec_depend>
+<exec_depend>cv_bridge</exec_depend>
+<exec_depend>python3-opencv</exec_depend>
+<exec_depend>mavros_msgs</exec_depend>
+<exec_depend>nav_msgs</exec_depend>
+<exec_depend>tf2_ros</exec_depend>
+<exec_depend>launch_ros</exec_depend>
+<exec_depend>ament_index_python</exec_depend>
+<export><build_type>ament_python</build_type></export></package>

@@ -6,6 +6,7 @@ setup(
     name=package_name,
     version='0.3.0',
     packages=find_packages(exclude=['test']),
+    py_modules=['geofence_monitor'],
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
@@ -19,7 +20,7 @@ setup(
     entry_points={
         'console_scripts': [
             'safety_supervisor = uav_safety.safety_supervisor:main',
-            'uav_geofence = uav_safety.geofence_monitor:main',
+            'uav_geofence = geofence_monitor:main',
         ],
     },
 )

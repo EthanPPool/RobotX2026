@@ -1,0 +1,22 @@
+/**:
+  ros__parameters:
+    map_frame: robotx_map
+    # Set on every vehicle from the SAME surveyed WGS84 water datum.
+    datum_configured: false
+    origin_latitude: 0.0
+    origin_longitude: 0.0
+    water_altitude: 0.0
+    image_topic: /uav/downward/image_raw
+    camera_info_topic: /uav/downward/camera_info
+    georef_uncertainty: 0.75
+    max_rate: 2.0
+    image_timeout: 0.5
+    survey_ttl: 60.0
+    # SECOND OAK-D on the UAV Raspberry Pi. Required when start_camera:=true.
+    # Use its DeviceID/MXID, never discovery order or the first camera's ID.
+    camera_device_id: ''
+    camera_frame: uav/downward_optical
+    width: 640
+    height: 480
+    fps: 10.0
+    # Intrinsics and distortion come from each calibrated OAK-D RGB frame.

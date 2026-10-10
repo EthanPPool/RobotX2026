@@ -16,6 +16,7 @@ setup(
     description='Normalized target interface for future camera/perception nodes.',
     license='Apache-2.0',
     entry_points={'console_scripts': [
+        'oak_rgb_node = uav_perception.oak_rgb_node:main',
         'target_filter = uav_perception.target_filter:main',
         'mock_target_publisher = uav_perception.mock_target_publisher:main',
     ]},

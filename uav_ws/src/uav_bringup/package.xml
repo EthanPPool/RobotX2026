@@ -7,10 +7,13 @@
   <license>Apache-2.0</license>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <exec_depend>mavros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
   <exec_depend>uav_vehicle</exec_depend>
   <exec_depend>uav_safety</exec_depend>
   <exec_depend>uav_control</exec_depend>
   <exec_depend>uav_perception</exec_depend>
+  <exec_depend>uav_mapping</exec_depend>
   <exec_depend>uav_mission</exec_depend>
   <exec_depend>uav_dashboard_bridge</exec_depend>
   <export><build_type>ament_python</build_type></export>
