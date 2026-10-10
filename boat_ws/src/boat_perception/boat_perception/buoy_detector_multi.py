@@ -58,12 +58,14 @@ from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
 
 from sensor_msgs.msg import PointCloud2
+from geometry_msgs.msg import PoseStamped
 from sensor_msgs_py import point_cloud2
 from std_msgs.msg import String
 from tf2_ros import Buffer, TransformException, TransformListener
 from visualization_msgs.msg import Marker, MarkerArray
 
 from boat_interfaces.msg import DetectedObject, DetectedObjectArray
+from boat_perception.pose_history import PoseHistory, stamp_seconds, to_map, to_body
 
 
 # =============================================================================
@@ -489,16 +491,54 @@ class MultiTypeBuoyDetector(Node):
         # ---------------------------------------------------------------------
         self.next_track_id = 1
         self.tracks = {}
+        self.motion_compensation = bool(self.declare_parameter('motion_compensation', False).value)
+        self.pose_history = PoseHistory()
+        self.previous_cloud_pose = None
+        self.previous_cloud_stamp = None
+        pose_topic = self.declare_parameter('local_position_topic', '/mavros/local_position/pose').value
+        self.create_subscription(PoseStamped, pose_topic, self.tracking_pose_callback,
+                                 qos_profile_sensor_data)
+        if self.motion_compensation and self.target_frame != 'base_link':
+            raise ValueError('Motion compensation requires target_frame=base_link')
 
-        loaded_names = ', '.join(
-            sorted(self.buoy_types.keys())
-        )
-
+        loaded_names = ', '.join(sorted(self.buoy_types.keys()))
         self.get_logger().info(
             'Multi-type buoy detector v4 started. '
             f'Generic model: {self.generic_buoy_spec.name}; subtypes: {loaded_names}. '
             f'Diagnostics: {self.diagnostics_topic}'
         )
+
+    def tracking_pose_callback(self, msg):
+        q = msg.pose.orientation
+        values = (msg.pose.position.x, msg.pose.position.y, q.x, q.y, q.z, q.w)
+        if not all(math.isfinite(v) for v in values):
+            return
+        yaw = math.atan2(2 * (q.w * q.z + q.x * q.y),
+                         1 - 2 * (q.y * q.y + q.z * q.z))
+        self.pose_history.add(stamp_seconds(msg.header.stamp),
+                              float(msg.pose.position.x), float(msg.pose.position.y), yaw)
+
+    def compensate_tracks(self, stamp):
+        if self.previous_cloud_stamp is not None and stamp <= self.previous_cloud_stamp:
+            return False
+        self.previous_cloud_stamp = stamp
+        if not self.motion_compensation:
+            return True
+        pose = self.pose_history.at(stamp)
+        if pose is None:
+            # Never treat old body-frame coordinates as current observations.
+            self.tracks.clear()
+            self.previous_cloud_pose = None
+            return True
+        if self.previous_cloud_pose is not None:
+            for track in self.tracks.values():
+                fixed = to_map((track.x, track.y), self.previous_cloud_pose)
+                x, y = to_body(fixed, pose)
+                track.features.update(x=x, y=y, range=math.hypot(x, y))
+        elif self.tracks:
+            self.tracks.clear()
+        self.previous_cloud_pose = pose
+        return True
 
     # =========================================================================
     # GLOBAL BUOY CONFIGURATION
@@ -577,6 +617,8 @@ class MultiTypeBuoyDetector(Node):
     # Runs once for every incoming Unitree LiDAR point cloud.
     # -------------------------------------------------------------------------
     def cloud_callback(self, cloud):
+        if not self.compensate_tracks(stamp_seconds(cloud.header.stamp)):
+            return
         # Decode raw XYZ points.
         input_points = self.read_xyz(cloud)
         input_count = len(input_points)

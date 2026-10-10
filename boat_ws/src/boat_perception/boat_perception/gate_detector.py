@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 
-import itertools
+import copy
+import json
 import math
 
 import rclpy
 from rclpy.node import Node
 
 from visualization_msgs.msg import Marker, MarkerArray
+from std_msgs.msg import String
 
-from boat_interfaces.msg import DetectedObject, DetectedObjectArray, Gate
+from boat_interfaces.msg import DetectedObjectArray, Gate, GateArray
+from boat_perception.gate_candidates import find_pairs
+from boat_perception.pose_history import stamp_seconds
 
 
 class GateDetector(Node):
@@ -28,25 +32,27 @@ class GateDetector(Node):
 
         self.min_buoy_confidence = float(
             self.declare_parameter(
-                'min_buoy_confidence', 0.40
+                'min_buoy_confidence', 0.60
             ).value
         )
 
         self.min_gate_width = float(
-            self.declare_parameter('min_gate_width', 1.20).value
+            self.declare_parameter('min_gate_width', 1.83).value
         )
         self.max_gate_width = float(
-            self.declare_parameter('max_gate_width', 5.50).value
+            self.declare_parameter('max_gate_width', 3.05).value
         )
         self.nominal_gate_width = float(
-            self.declare_parameter('nominal_gate_width', 3.0).value
+            self.declare_parameter('nominal_gate_width', 2.44).value
         )
         self.gate_width_tolerance = float(
             self.declare_parameter(
-                'gate_width_tolerance', 1.5
+                'gate_width_tolerance', 0.75
             ).value
         )
 
+        # Accepted for older parameter files; max_gate_skew_deg now controls
+        # orientation instead of these heading-dependent limits.
         self.max_depth_difference = float(
             self.declare_parameter(
                 'max_depth_difference', 1.20
@@ -60,48 +66,49 @@ class GateDetector(Node):
         )
 
         self.min_center_x = float(
-            self.declare_parameter('min_center_x', 0.60).value
+            self.declare_parameter('min_center_x', 0.75).value
         )
         self.max_center_x = float(
-            self.declare_parameter('max_center_x', 15.0).value
+            self.declare_parameter('max_center_x', 10.0).value
         )
 
         self.min_gate_confidence = float(
             self.declare_parameter(
-                'min_gate_confidence', 0.60
+                'min_gate_confidence', 0.72
             ).value
         )
 
-        # Temporal gate confirmation.
-        self.confirm_hits = int(
-            self.declare_parameter('confirm_hits', 3).value
+        self.confirm_hits = int(self.declare_parameter('confirm_hits', 2).value)
+        self.gates_topic = self.declare_parameter('gates_topic', '/perception/gates').value
+        self.publish_rate = float(self.declare_parameter('publish_rate', 10.0).value)
+        self.hold_timeout = float(self.declare_parameter('hold_timeout', 1.8).value)
+        self.pair_parameters = dict(
+            min_confidence=self.min_buoy_confidence, min_width=self.min_gate_width,
+            max_width=self.max_gate_width, nominal_width=self.nominal_gate_width,
+            width_tolerance=self.gate_width_tolerance, min_x=self.min_center_x,
+            max_x=self.max_center_x,
+            max_skew_deg=float(self.declare_parameter('max_gate_skew_deg', 55.0).value),
+            max_buoys=int(self.declare_parameter('max_buoys', 64).value),
+            max_candidates=int(self.declare_parameter('max_gate_candidates', 64).value),
+            require_red_green=bool(self.declare_parameter('require_red_green', False).value),
+            min_pair_confidence=self.min_gate_confidence,
         )
-        self.max_misses = int(
-            self.declare_parameter('max_misses', 2).value
-        )
-        self.center_association_distance = float(
-            self.declare_parameter(
-                'center_association_distance', 0.80
-            ).value
-        )
-        self.width_association_tolerance = float(
-            self.declare_parameter(
-                'width_association_tolerance', 0.90
-            ).value
-        )
-        self.track_alpha = float(
-            self.declare_parameter('track_alpha', 0.65).value
-        )
-
-        self.tracked_center_x = None
-        self.tracked_center_y = None
-        self.tracked_width = None
-        self.tracked_confidence = 0.0
-        self.tracked_left = None
-        self.tracked_right = None
-
-        self.hits = 0
-        self.misses = 0
+        p = self.pair_parameters
+        if (not all(math.isfinite(v) for v in p.values()) or
+                not 0 < p['min_width'] <= p['max_width'] or p['width_tolerance'] <= 0 or
+                not 0 <= p['min_x'] < p['max_x'] or not 0 < p['max_skew_deg'] < 90 or
+                not 0 <= p['min_confidence'] <= 1 or not 0 <= self.min_gate_confidence <= 1 or
+                not 2 <= p['max_buoys'] <= 256 or not 1 <= p['max_candidates'] <= 256 or
+                self.confirm_hits < 1 or not 0 < self.publish_rate <= 100 or
+                not math.isfinite(self.hold_timeout) or self.hold_timeout <= 0):
+            raise ValueError('Invalid gate confirmation, geometry or workload parameters')
+        self.pair_hits = {}
+        self.last_input_stamp = None
+        self.last_measurement_time = None
+        self.confirmed = None
+        self.gates_pub = self.create_publisher(GateArray, self.gates_topic, 10)
+        self.diagnostics_pub = self.create_publisher(String, '/perception/gate_diagnostics', 10)
+        self.create_timer(1.0 / self.publish_rate, self.publish_tracked_gate)
 
         self.gate_pub = self.create_publisher(
             Gate,
@@ -129,216 +136,59 @@ class GateDetector(Node):
         )
 
     def objects_callback(self, msg):
-        buoys = [
-            obj
-            for obj in msg.objects
-            if obj.object_type == DetectedObject.TYPE_BUOY
-            and obj.confidence >= self.min_buoy_confidence
-            and obj.position.x >= self.min_center_x
-            and obj.position.x <= self.max_center_x
-        ]
-
-        candidate = self.find_best_pair(buoys)
-
-        if candidate is None:
-            self.misses += 1
-
-            if self.misses > self.max_misses:
-                self.reset_track()
-
-            self.publish_empty_markers(msg.header)
+        stamp = stamp_seconds(msg.header.stamp)
+        if msg.header.frame_id != 'base_link' or stamp <= 0:
+            self.confirmed = None
+            self.pair_hits.clear()
             return
+        if self.last_input_stamp is not None and stamp <= self.last_input_stamp:
+            return  # Republishing a scan is not another confirmation hit.
+        self.last_input_stamp = stamp
+        candidates = find_pairs(msg.objects, **self.pair_parameters)
+        hits, confirmed = {}, []
+        for candidate in candidates:
+            key = candidate['key']
+            hits[key] = self.pair_hits.get(key, 0) + 1
+            if hits[key] < self.confirm_hits or candidate['confidence'] < self.min_gate_confidence:
+                continue
+            gate = Gate()
+            gate.header = copy.deepcopy(msg.header)
+            gate.left_marker, gate.right_marker = candidate['left'], candidate['right']
+            gate.center.x, gate.center.y = candidate['center_x'], candidate['center_y']
+            gate.width, gate.confidence = candidate['width'], candidate['confidence']
+            confirmed.append(gate)
+        self.pair_hits = hits
+        output = GateArray()
+        output.header = copy.deepcopy(msg.header)
+        output.gates = confirmed
+        self.confirmed = output
+        self.last_measurement_time = self.get_clock().now()
+        info = String()
+        info.data = json.dumps(dict(input_objects=len(msg.objects),
+            plausible_pairs=len(candidates), confirmed_pairs=len(confirmed),
+            max_buoys=self.pair_parameters['max_buoys'],
+            max_candidates=self.pair_parameters['max_candidates']))
+        self.diagnostics_pub.publish(info)
 
-        self.update_gate_track(candidate)
-
-        if self.hits < self.confirm_hits:
-            self.publish_empty_markers(msg.header)
+    def publish_tracked_gate(self):
+        age = (None if self.last_measurement_time is None else
+               (self.get_clock().now() - self.last_measurement_time).nanoseconds / 1e9)
+        if self.confirmed is None or age is None or age < 0 or age > self.hold_timeout:
+            empty = GateArray()
+            empty.header.stamp = self.get_clock().now().to_msg()
+            empty.header.frame_id = 'base_link'
+            self.gates_pub.publish(empty)
+            self.publish_empty_markers(empty.header)
+            self.pair_hits.clear()
             return
-
-        if self.tracked_confidence < self.min_gate_confidence:
-            return
-
-        gate = Gate()
-        gate.header = msg.header
-        gate.header.frame_id = 'base_link'
-
-        gate.left_marker = self.tracked_left
-        gate.right_marker = self.tracked_right
-
-        gate.center.x = float(self.tracked_center_x)
-        gate.center.y = float(self.tracked_center_y)
-        gate.center.z = 0.0
-
-        gate.width = float(self.tracked_width)
-        gate.confidence = float(self.tracked_confidence)
-
-        self.gate_pub.publish(gate)
-        self.publish_gate_markers(gate)
-
-    def find_best_pair(self, buoys):
-        best = None
-
-        for a, b in itertools.combinations(buoys, 2):
-            dx = a.position.x - b.position.x
-            dy = a.position.y - b.position.y
-
-            width = math.hypot(dx, dy)
-
-            if width < self.min_gate_width:
-                continue
-
-            if width > self.max_gate_width:
-                continue
-
-            depth_difference = abs(dx)
-
-            if depth_difference > self.max_depth_difference:
-                continue
-
-            # Gate markers should be predominantly separated laterally,
-            # rather than one marker being far behind the other.
-            lateral_fraction = (
-                abs(dy) / width
-                if width > 1e-6
-                else 0.0
-            )
-
-            if lateral_fraction < self.min_lateral_fraction:
-                continue
-
-            center_x = 0.5 * (
-                a.position.x + b.position.x
-            )
-            center_y = 0.5 * (
-                a.position.y + b.position.y
-            )
-
-            if center_x < self.min_center_x:
-                continue
-
-            if center_x > self.max_center_x:
-                continue
-
-            object_confidence = 0.5 * (
-                float(a.confidence)
-                + float(b.confidence)
-            )
-
-            alignment_score = max(
-                0.0,
-                1.0
-                - depth_difference
-                / max(self.max_depth_difference, 1e-6)
-            )
-
-            width_error = (
-                abs(width - self.nominal_gate_width)
-                / max(self.gate_width_tolerance, 1e-6)
-            )
-            width_score = math.exp(
-                -0.5 * width_error * width_error
-            )
-
-            confidence = (
-                0.45 * object_confidence
-                + 0.25 * alignment_score
-                + 0.20 * lateral_fraction
-                + 0.10 * width_score
-            )
-
-            if best is not None:
-                if confidence <= best['confidence']:
-                    continue
-
-            if a.position.y >= b.position.y:
-                left = a.position
-                right = b.position
-            else:
-                left = b.position
-                right = a.position
-
-            best = {
-                'left': left,
-                'right': right,
-                'center_x': center_x,
-                'center_y': center_y,
-                'width': width,
-                'confidence': confidence,
-            }
-
-        return best
-
-    def update_gate_track(self, candidate):
-        if self.tracked_center_x is None:
-            self.start_track(candidate)
-            return
-
-        center_distance = math.hypot(
-            candidate['center_x'] - self.tracked_center_x,
-            candidate['center_y'] - self.tracked_center_y,
-        )
-
-        width_difference = abs(
-            candidate['width'] - self.tracked_width
-        )
-
-        same_gate = (
-            center_distance <= self.center_association_distance
-            and width_difference
-            <= self.width_association_tolerance
-        )
-
-        if not same_gate:
-            self.start_track(candidate)
-            return
-
-        a = self.track_alpha
-        b = 1.0 - a
-
-        self.tracked_center_x = (
-            a * candidate['center_x']
-            + b * self.tracked_center_x
-        )
-        self.tracked_center_y = (
-            a * candidate['center_y']
-            + b * self.tracked_center_y
-        )
-        self.tracked_width = (
-            a * candidate['width']
-            + b * self.tracked_width
-        )
-        self.tracked_confidence = (
-            a * candidate['confidence']
-            + b * self.tracked_confidence
-        )
-
-        self.tracked_left = candidate['left']
-        self.tracked_right = candidate['right']
-
-        self.hits += 1
-        self.misses = 0
-
-    def start_track(self, candidate):
-        self.tracked_center_x = candidate['center_x']
-        self.tracked_center_y = candidate['center_y']
-        self.tracked_width = candidate['width']
-        self.tracked_confidence = candidate['confidence']
-        self.tracked_left = candidate['left']
-        self.tracked_right = candidate['right']
-
-        self.hits = 1
-        self.misses = 0
-
-    def reset_track(self):
-        self.tracked_center_x = None
-        self.tracked_center_y = None
-        self.tracked_width = None
-        self.tracked_confidence = 0.0
-        self.tracked_left = None
-        self.tracked_right = None
-
-        self.hits = 0
-        self.misses = 0
+        self.gates_pub.publish(self.confirmed)
+        if self.confirmed.gates:
+            # Compatibility output. The mission consumes the full array.
+            nearest = self.confirmed.gates[0]
+            self.gate_pub.publish(nearest)
+            self.publish_gate_markers(nearest)
+        else:
+            self.publish_empty_markers(self.confirmed.header)
 
     def publish_empty_markers(self, header):
         markers = MarkerArray()

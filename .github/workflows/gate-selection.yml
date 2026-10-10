@@ -1,0 +1,17 @@
+name: Gate selection regression checks
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  geometry-and-callbacks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run geometry and real callback checks without ROS
+        run: python3 -m unittest discover -s boat_ws/tests -v
