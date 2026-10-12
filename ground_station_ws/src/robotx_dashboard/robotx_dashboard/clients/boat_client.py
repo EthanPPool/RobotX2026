@@ -124,7 +124,7 @@ class BoatClient(BaseVehicleClient):
             }
 
         if not waiter["event"].wait(
-            self.command_timeout
+            max(self.command_timeout, 20.0) if command in ("mission_process", "enable", "reset_mission") else self.command_timeout
         ):
             with self._pending_lock:
                 self._pending.pop(request_id, None)

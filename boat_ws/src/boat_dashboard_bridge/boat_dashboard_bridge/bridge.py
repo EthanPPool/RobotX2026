@@ -30,6 +30,7 @@ from tf2_ros import Buffer, TransformListener
 
 from boat_interfaces.msg import DetectedObjectArray, Gate
 from boat_interfaces.srv import ResetMissionLog
+from boat_dashboard_bridge.mission_process import MissionProcess, PROFILES, launch_command
 
 
 class BoatDashboardBridge(Node):
@@ -42,6 +43,14 @@ class BoatDashboardBridge(Node):
         self.send_lock = threading.RLock()
         self.action_lock = threading.RLock()
         self.client_socket = None
+
+        self.manage_missions = bool(self.declare_parameter("manage_missions", False).value)
+        self.mission_manager = MissionProcess(self.declare_parameter("route_config", "").value)
+        self.managed_diagnostics = {}
+        self.managed_diagnostics_rx = None
+        self.managed_bridge_diagnostics = {}
+        self.managed_bridge_rx = None
+        self.managed_started = None
 
         self.mission_service = (
             "robotx-usv-autonomy.service"
@@ -272,6 +281,13 @@ class BoatDashboardBridge(Node):
             Trigger,
             "/mission/reset",
         )
+
+        self.gate_enable_client = self.create_client(SetBool, "/mission/set_enabled")
+        self.route_enable_client = self.create_client(SetBool, "/boat/route/set_enabled")
+        self.route_reset_client = self.create_client(Trigger, "/boat/route/reset")
+        self.create_subscription(String, "/mission/diagnostics", self.managed_gate_callback, 10)
+        self.create_subscription(String, "/boat/route/status", self.managed_route_callback, 10)
+        self.create_subscription(String, "/vehicle/control_diagnostics", self.managed_bridge_callback, 10)
 
         self.logger_reset_client = self.create_client(
             ResetMissionLog,
@@ -737,7 +753,174 @@ class BoatDashboardBridge(Node):
             "bridge_alive": bridge_alive,
         }
 
+    def managed_gate_callback(self, msg):
+        if self.manage_missions and self.mission_manager.profile == "two_gate":
+            self.update_managed_diagnostics(msg)
+
+    def managed_route_callback(self, msg):
+        if self.manage_missions and self.mission_manager.profile == "uav_route":
+            self.update_managed_diagnostics(msg)
+
+    def update_managed_diagnostics(self, msg):
+        try:
+            data = json.loads(msg.data)
+        except (ValueError, TypeError):
+            return
+        if isinstance(data, dict):
+            with self.lock:
+                self.managed_diagnostics = data
+                self.managed_diagnostics_rx = time.monotonic()
+
+    def managed_bridge_callback(self, msg):
+        try:
+            data = json.loads(msg.data)
+        except (ValueError, TypeError):
+            return
+        if isinstance(data, dict):
+            with self.lock:
+                self.managed_bridge_diagnostics = data
+                self.managed_bridge_rx = time.monotonic()
+
+    def managed_publishers(self):
+        return self.get_publishers_info_by_topic("/mission/target")
+
+    def managed_publisher_matches(self):
+        publishers = self.managed_publishers()
+        expected = PROFILES[self.mission_manager.profile]["node"]
+        return (len(publishers) == 1 and publishers[0].node_name == expected
+                and publishers[0].node_namespace == "/")
+
+    def managed_controller_matches(self):
+        publishers = self.get_publishers_info_by_topic("/control/cmd_vel")
+        return (len(publishers) == 1 and publishers[0].node_name == "target_controller"
+                and publishers[0].node_namespace == "/")
+
+    def managed_mission_status(self):
+        state = self.mission_manager.status()
+        with self.lock:
+            data = dict(self.managed_diagnostics)
+            age = None if self.managed_diagnostics_rx is None else time.monotonic() - self.managed_diagnostics_rx
+        fresh = age is not None and age <= 0.5
+        if state["profile"] == "uav_route":
+            reason = data.get("route_state", "WAITING_FOR_ROUTE_STATUS")
+            ready = fresh and reason == "ROUTE_TRACKING"
+        else:
+            reason = data.get("mission_reason", "WAITING_FOR_GATE_STATUS")
+            ready = (fresh and reason == "TRACKING_GATE" and
+                     data.get("mission_phase") == "TRACK_GATE" and
+                     data.get("gate_identity_locked") is True)
+        state.update(ready=bool(state["running"] and not state["error"] and ready and
+                                self.managed_publisher_matches() and self.managed_controller_matches()), reason=reason,
+                     diagnostics_age_sec=age)
+        return state
+
+    def managed_safe_stop(self, require_disarmed):
+        if require_disarmed:
+            status = self.local_status()
+            if not status["online"] or status["armed"]:
+                return False, "Load/start requires a connected, freshly confirmed DISARMED vehicle"
+        previous = time.monotonic()
+        ok, message = self.execute_stop()
+        if not ok:
+            return False, message
+        deadline = time.monotonic() + 1.5
+        while time.monotonic() < deadline:
+            with self.lock:
+                d = self.managed_bridge_diagnostics
+                neutral = (self.managed_bridge_rx is not None and self.managed_bridge_rx > previous
+                           and d.get("bridge_autonomy_enabled") is False
+                           and d.get("software_estop") is True
+                           and self.bridge_last_rx is not None and self.bridge_last_rx > previous
+                           and abs(self.telemetry["bridge_forward"]) < 1e-6
+                           and abs(self.telemetry["bridge_yaw"]) < 1e-6
+                           and not self.operator_deadman)
+            if neutral:
+                status = self.local_status()
+                if require_disarmed and (not status["online"] or status["armed"]):
+                    return False, "Vehicle state changed during mission loading"
+                return True, "Neutral output confirmed; autonomy off"
+            time.sleep(0.02)
+        return False, "Neutral output / revoked authority was not confirmed; mission unchanged"
+
+    def execute_managed_process(self, action, profile=None):
+        with self.action_lock:
+            if action == "status":
+                return True, "Mission manager status", {"mission_manager": self.managed_mission_status()}
+            if action not in ("select", "start", "stop"):
+                return False, "action must be select, start, stop, or status"
+            if action == "select":
+                try:
+                    launch_command(profile, self.mission_manager.route_config)
+                except (ValueError, TypeError) as exc:
+                    return False, str(exc)
+            ok, message = self.managed_safe_stop(action != "stop")
+            if not ok:
+                return False, message
+            if action in ("select", "stop"):
+                self.mission_manager.stop()
+                self.managed_started = None
+                deadline = time.monotonic() + 2.0
+                while self.managed_publishers() and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                if self.managed_publishers():
+                    return False, "Another mission still publishes targets; stop its launcher before loading"
+                if action == "select":
+                    status = self.local_status()
+                    if not status["online"] or status["armed"]:
+                        return False, "Vehicle state changed during mission loading"
+                    self.mission_manager.select(profile)
+                with self.lock:
+                    self.managed_diagnostics = {}
+                    self.managed_diagnostics_rx = None
+                    self.telemetry["mission_state"] = "MISSION_LOADED" if action == "select" else "MISSION_STOPPED"
+                return True, ("Mission loaded; START MISSION PROCESS next" if action == "select"
+                              else "Mission stopped; autonomy off")
+            if self.managed_publishers():
+                return False, "A mission target publisher already exists; start rejected"
+            status = self.local_status()
+            if not status["online"] or status["armed"] or not self.managed_controller_matches():
+                return False, "Start requires DISARMED state and exactly one target_controller"
+            try:
+                self.mission_manager.start()
+            except (ValueError, RuntimeError, OSError) as exc:
+                return False, str(exc)
+            self.managed_started = time.monotonic()
+            deadline = time.monotonic() + 4.0
+            client = self.route_enable_client if self.mission_manager.profile == "uav_route" else self.gate_enable_client
+            while time.monotonic() < deadline:
+                if not self.mission_manager.status()["running"]:
+                    break
+                if self.managed_publisher_matches() and client.service_is_ready():
+                    return True, "Mission process started; use RESET, ENABLE AUTONOMY, then ARM"
+                time.sleep(0.05)
+            self.mission_manager.stop()
+            self.managed_started = None
+            self.mission_manager.fault = "Mission startup failed; inspect mission process log and load to retry"
+            return False, self.mission_manager.fault
+
+    def monitor_managed_mission(self):
+        if not self.manage_missions or self.managed_started is None:
+            return
+        if not self.action_lock.acquire(blocking=False):
+            return
+        try:
+            if time.monotonic() - self.managed_started < 3.0:
+                return
+            state = self.managed_mission_status()
+            age = state["diagnostics_age_sec"]
+            if (not state["running"] or not self.managed_publisher_matches() or
+                    not self.managed_controller_matches() or
+                    age is None or age > 2.0):
+                self.execute_fail_safe_stop()
+                self.mission_manager.stop()
+                self.managed_started = None
+                self.mission_manager.fault = "Mission process/heartbeat/publisher fault; stopped, load to retry"
+        finally:
+            self.action_lock.release()
+
     def mission_process_status(self, force=False):
+        if self.manage_missions:
+            return self.mission_manager.status()["state"]
         now = time.monotonic()
 
         with self.lock:
@@ -784,7 +967,9 @@ class BoatDashboardBridge(Node):
         return state
 
 
-    def execute_mission_process(self, action):
+    def execute_mission_process(self, action, profile=None):
+        if self.manage_missions:
+            return self.execute_managed_process(str(action or "status").strip().lower(), profile)
         action = str(
             action or "status"
         ).strip().lower()
@@ -1053,7 +1238,9 @@ class BoatDashboardBridge(Node):
         self,
         timeout=2.0,
     ):
-        if not self.reset_client.wait_for_service(
+        reset_client = (self.route_reset_client if self.manage_missions and
+                        self.mission_manager.profile == "uav_route" else self.reset_client)
+        if not reset_client.wait_for_service(
             timeout_sec=0.50
         ):
             return (
@@ -1063,7 +1250,7 @@ class BoatDashboardBridge(Node):
 
         request = Trigger.Request()
 
-        future = self.reset_client.call_async(
+        future = reset_client.call_async(
             request
         )
 
@@ -1269,6 +1456,9 @@ class BoatDashboardBridge(Node):
         with self.action_lock:
             status = self.local_status()
 
+            if self.manage_missions and not self.mission_manager.status()["running"]:
+                return False, "Start the loaded mission process before enabling autonomy"
+
             if not status["online"]:
                 return (
                     False,
@@ -1425,6 +1615,17 @@ class BoatDashboardBridge(Node):
                     self.bridge_last_rx
                 )
 
+            if self.manage_missions:
+                if not self.managed_publisher_matches() or not self.managed_controller_matches():
+                    self.execute_fail_safe_stop()
+                    return False, "Mission publisher conflict; enable rejected"
+                client = (self.route_enable_client if self.mission_manager.profile == "uav_route"
+                          else self.gate_enable_client)
+                ok, msg = self.call_bool_service(client, True)
+                if not ok:
+                    self.execute_fail_safe_stop()
+                    return False, "Mission enable failed: " + msg
+
             ok, msg = self.call_bool_service(
                 self.autonomy_client,
                 True,
@@ -1518,7 +1719,9 @@ class BoatDashboardBridge(Node):
             # actually permit propulsion. Require current,
             # high-confidence gate perception here rather
             # than when autonomy is merely enabled.
-            if not status["gate_fresh"]:
+            if self.manage_missions and not self.managed_mission_status()["ready"]:
+                return False, "ARM rejected: selected mission not ready (see mission status)"
+            if (not self.manage_missions or self.mission_manager.profile == "two_gate") and not status["gate_fresh"]:
                 return (
                     False,
                     "ARM rejected: no fresh "
@@ -2014,7 +2217,8 @@ class BoatDashboardBridge(Node):
                 command_data.get("label", "")
             ),
             "mission_process": lambda: self.execute_mission_process(
-                command_data.get("action", "status")
+                command_data.get("action", "status"),
+                command_data.get("profile"),
             ),
             "get_log_file": lambda: self.get_mission_log_file(
                 command_data.get("kind", "csv")
@@ -2140,6 +2344,7 @@ class BoatDashboardBridge(Node):
             start = time.monotonic()
 
             try:
+                self.monitor_managed_mission()
                 self.publish_telemetry()
 
             except Exception as exc:
@@ -2198,6 +2403,10 @@ class BoatDashboardBridge(Node):
             self.mission_process_status()
         )
 
+        data["mission_selection_supported"] = self.manage_missions
+        if self.manage_missions:
+            data["mission_manager"] = self.managed_mission_status()
+
         data["mission_process_state"] = (
             mission_process_state
         )
@@ -2231,6 +2440,7 @@ class BoatDashboardBridge(Node):
         data["can_enable"] = bool(
             status["online"]
             and status["bridge_alive"]
+            and (not self.manage_missions or self.mission_manager.status()["running"])
             and
             self.control_state
             not in (
@@ -2286,6 +2496,7 @@ def main(args=None):
         pass
 
     finally:
+        node.mission_manager.stop()
         node.destroy_node()
 
         if rclpy.ok():
