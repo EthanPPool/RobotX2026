@@ -5728,6 +5728,25 @@ function makeVehiclePage(id, vehicle) {
             <div class="card">
                 <h2>Mission Process</h2>
 
+                ${vehicle.type === "USV" ? `
+                <div class="row">
+                    <label for="${id}-mission-profile">Mission</label>
+                    <select id="${id}-mission-profile" disabled
+                        onchange="document.getElementById('${id}-mission-start-button').disabled = true">
+                        <option value="two_gate">Two-gate mission</option>
+                        <option value="uav_route">UAV-mapped USV route</option>
+                    </select>
+                </div>
+                <button class="control-button reset-button"
+                    id="${id}-mission-load-button" disabled
+                    onclick="missionProcessAction('${id}', 'select')">LOAD MISSION</button>
+                <div class="row"><span>Loaded mission</span>
+                    <span class="value" id="${id}-mission-loaded">UNAVAILABLE</span></div>
+                <div class="control-message" id="${id}-mission-readiness">
+                    Mission selection requires the updated onboard manager.
+                </div>
+                ` : ""}
+
                 <div class="row">
                     <span>Service State</span>
                     <span
@@ -7414,6 +7433,27 @@ function updateVehicle(id, vehicle) {
     );
 
 
+    if (vehicle.type === "USV") {
+        const manager = vehicle.mission_manager ?? {};
+        const supported = Boolean(vehicle.mission_selection_supported && vehicle.jetson_link);
+        const selector = document.getElementById(`${id}-mission-profile`);
+        const loadButton = document.getElementById(`${id}-mission-load-button`);
+        if (selector) {
+            selector.disabled = !supported || Boolean(vehicle.armed);
+            if (manager.profile && selector.dataset.loadedProfile !== manager.profile) {
+                selector.value = manager.profile;
+                selector.dataset.loadedProfile = manager.profile;
+            }
+        }
+        if (loadButton) loadButton.disabled = !supported || Boolean(vehicle.armed);
+        setText(`${id}-mission-loaded`, manager.profile === "uav_route"
+            ? "UAV-mapped USV route" : manager.profile === "two_gate" ? "Two-gate mission" : "UNAVAILABLE");
+        setText(`${id}-mission-readiness`, supported
+            ? (manager.error || (manager.running ? (manager.ready ? "READY — " : "WAITING — ")
+                + String(manager.reason ?? "status pending") : "Loaded and stopped. Start the mission process next."))
+            : "Mission selection requires the updated onboard manager.");
+    }
+
     const missionStartButton =
         document.getElementById(
             `${id}-mission-start-button`
@@ -7439,7 +7479,9 @@ function updateVehicle(id, vehicle) {
 
         missionStartButton.disabled =
             !missionTransportReady
-            || missionRunning;
+            || missionRunning
+            || (Boolean(vehicle.mission_selection_supported)
+                && document.getElementById(`${id}-mission-profile`)?.value !== vehicle.mission_manager?.profile);
     }
 
 
@@ -7669,8 +7711,8 @@ function updateVehicle(id, vehicle) {
 
 
         if (armButton) {
-            armButton.disabled =
-                !vehicle.online;
+            armButton.disabled = !vehicle.online || (Boolean(vehicle.mission_selection_supported)
+                && (!vehicle.mission_manager?.ready || vehicle.control_state !== "AUTONOMY READY / DISARMED"));
         }
 
         if (disarmButton) {
@@ -8254,10 +8296,7 @@ async function missionProcessAction(
         );
 
 
-    const verb =
-        action === "start"
-            ? "START"
-            : "STOP";
+    const verb = action === "select" ? "LOAD" : action === "start" ? "START" : "STOP";
 
 
     const warning =
@@ -8306,7 +8345,10 @@ async function missionProcessAction(
                             "application/json"
                     },
                     body: JSON.stringify({
-                        action: action
+                        action: action,
+                        ...(action === "select" ? {
+                            profile: document.getElementById(`${vehicleId}-mission-profile`)?.value
+                        } : {})
                     })
                 }
             );
@@ -12531,13 +12573,17 @@ def api_vehicle_mission_process(vehicle_id):
             ),
         }), 404
 
+    profile = None
     if request.method == "GET":
         action = "status"
     else:
-        data = request.get_json(
-            silent=True
-        ) or {}
+        data = request.get_json(silent=True)
+        if data is None:
+            data = {}
 
+        if not isinstance(data, dict):
+            return jsonify({"success": False, "message": "Expected a JSON object"}), 400
+        profile = data.get("profile")
         action = str(
             data.get("action", "status")
         ).strip().lower()
@@ -12546,13 +12592,17 @@ def api_vehicle_mission_process(vehicle_id):
         "start",
         "stop",
         "status",
+        "select",
     ):
         return jsonify({
             "success": False,
             "message": (
-                "action must be start, stop, or status"
+                "action must be select, start, stop, or status"
             ),
         }), 400
+
+    if action == "select" and (vehicle_id != "boat" or profile not in ("two_gate", "uav_route")):
+        return jsonify({"success": False, "message": "Select a supported USV mission profile"}), 400
 
     client = (
         dashboard_node
@@ -12570,6 +12620,7 @@ def api_vehicle_mission_process(vehicle_id):
         "mission_process",
         {
             "action": action,
+            **({"profile": profile} if action == "select" else {}),
         },
     )
 

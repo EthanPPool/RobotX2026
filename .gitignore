@@ -3,3 +3,9 @@
 /build/
 /install/
 /log/
+
+# Mission selection overlay and Python bytecode
+**/__pycache__/
+/build-selection-*/
+/install-selection-*/
+/log-selection-*/
