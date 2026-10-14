@@ -13,6 +13,7 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch.event_handlers import OnShutdown
+from launch_ros.actions import Node
 
 from ament_index_python.packages import get_package_share_directory
 
@@ -66,10 +67,33 @@ def generate_launch_description():
         'launch.py'
     )
 
-    lidar = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            lidar_launch
-        )
+    # ---------------------------------------------------------
+    # Unitree L2 driver
+    #
+    # Launch the hardware node directly so RobotX owns the
+    # production configuration instead of relying on vendor
+    # launch defaults.
+    #
+    # The Unitree driver also publishes its own internal TF
+    # chain. Keep that available on /unilidar/tf while the
+    # vehicle URDF remains authoritative for /tf.
+    # ---------------------------------------------------------
+
+    unitree_config = os.path.join(
+        get_package_share_directory('boat_sensors'),
+        'config',
+        'unitree_l2.yaml'
+    )
+
+    lidar = Node(
+        package='unitree_lidar_ros2',
+        executable='unitree_lidar_ros2_node',
+        name='unitree_lidar_ros2_node',
+        output='screen',
+        parameters=[unitree_config],
+        remappings=[
+            ('/tf', '/unilidar/tf'),
+        ],
     )
 
 

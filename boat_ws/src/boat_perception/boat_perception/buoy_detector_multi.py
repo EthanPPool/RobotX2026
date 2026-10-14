@@ -526,8 +526,13 @@ class MultiTypeBuoyDetector(Node):
             return True
         pose = self.pose_history.at(stamp)
         if pose is None:
-            # Never treat old body-frame coordinates as current observations.
-            self.tracks.clear()
+            # Local pose is unavailable, so motion compensation cannot be
+            # applied for this frame. Preserve the physical tracks in
+            # base_link coordinates instead of destroying temporal evidence.
+            #
+            # Forget the previous compensated pose so that, when local pose
+            # later returns, we do not apply a transform across an interval
+            # whose vehicle motion was unknown.
             self.previous_cloud_pose = None
             return True
         if self.previous_cloud_pose is not None:
