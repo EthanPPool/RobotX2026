@@ -59,7 +59,25 @@ class Task1GateMission(Node):
                 not 0 < bearing_limit < 90):
             raise ValueError('Invalid gate selection or freshness parameters')
         self.gate_selector = GateSelector(center_limit, marker_limit, width_limit, bearing_limit)
-        self.pose_history = PoseHistory()
+
+        self.pose_history_tolerance = float(
+            self.declare_parameter(
+                'pose_history_tolerance',
+                0.35
+            ).value
+        )
+
+        if (
+            not math.isfinite(self.pose_history_tolerance)
+            or self.pose_history_tolerance <= 0.0
+        ):
+            raise ValueError(
+                'pose_history_tolerance must be positive'
+            )
+
+        self.pose_history = PoseHistory(
+            tolerance=self.pose_history_tolerance
+        )
         self.selected_measurement_stamp = None
         self.gate_candidate_count = 0
         self.gate_selection_reason = 'NO_CANDIDATES'
@@ -103,6 +121,14 @@ class Task1GateMission(Node):
         self.pass_clear_distance = float(
             self.declare_parameter('pass_clear_distance', 1.0).value
         )
+        self.pass_duration = float(
+            self.declare_parameter('pass_duration', 35.0).value
+        )
+        self.pass_heading_target_distance = float(
+            self.declare_parameter(
+                'pass_heading_target_distance', 5.0
+            ).value
+        )
         self.local_pose_timeout = float(
             self.declare_parameter('local_pose_timeout', 0.50).value
         )
@@ -122,6 +148,12 @@ class Task1GateMission(Node):
             )
         if self.pass_edge_margin < 0.0:
             raise ValueError('pass_edge_margin cannot be negative')
+        if self.pass_duration <= 0.0:
+            raise ValueError('pass_duration must be positive')
+        if self.pass_heading_target_distance <= 0.0:
+            raise ValueError(
+                'pass_heading_target_distance must be positive'
+            )
         if self.local_pose_timeout <= 0.0:
             raise ValueError('local_pose_timeout must be positive')
 
@@ -138,6 +170,7 @@ class Task1GateMission(Node):
         self.tracked_port = None
         self.tracked_starboard = None
         self.tracked_midpoint = None
+        self.tracked_midpoint_body = None
         self.tracked_gate_measurement_time = None
 
         self.saved_port = None
@@ -148,6 +181,8 @@ class Task1GateMission(Node):
         self.saved_gate_width = None
         self.saved_usable_half_width = None
         self.saved_pass_target = None
+        self.saved_pass_heading = None
+        self.pass_started_at = None
         self.gate_entry_side = None
         self.previous_pass_signed_distance = None
         self.previous_pass_lateral_offset = None
@@ -366,6 +401,7 @@ class Task1GateMission(Node):
         self.tracked_port = None
         self.tracked_starboard = None
         self.tracked_midpoint = None
+        self.tracked_midpoint_body = None
         self.tracked_gate_measurement_time = None
 
     def update_tracked_gate_geometry(self, gate, measurement_pose=None):
@@ -373,32 +409,60 @@ class Task1GateMission(Node):
             return False
 
         if measurement_pose is None:
-            measurement_pose = self.pose_history.at(stamp_seconds(gate.header.stamp))
+            measurement_pose = self.pose_history.at(
+                stamp_seconds(gate.header.stamp)
+            )
         if measurement_pose is None:
             return False
-        port_map = to_map((float(gate.left_marker.x), float(gate.left_marker.y)), measurement_pose)
-        starboard_map = to_map((float(gate.right_marker.x), float(gate.right_marker.y)), measurement_pose)
+
+        port_map = to_map(
+            (
+                float(gate.left_marker.x),
+                float(gate.left_marker.y),
+            ),
+            measurement_pose,
+        )
+        starboard_map = to_map(
+            (
+                float(gate.right_marker.x),
+                float(gate.right_marker.y),
+            ),
+            measurement_pose,
+        )
+
         if port_map is None or starboard_map is None:
             return False
 
         px, py = port_map
         sx, sy = starboard_map
+
         if math.hypot(sx - px, sy - py) <= 1e-6:
             return False
 
         self.tracked_port = (px, py)
         self.tracked_starboard = (sx, sy)
-        self.tracked_midpoint = (0.5 * (px + sx), 0.5 * (py + sy))
+        self.tracked_midpoint = (
+            0.5 * (px + sx),
+            0.5 * (py + sy),
+        )
+
+        # This is the important GPS-tolerance change:
+        # retain the actual LiDAR-relative gate center for control.
+        self.tracked_midpoint_body = (
+            float(gate.center.x),
+            float(gate.center.y),
+        )
+
         self.tracked_gate_measurement_time = self.get_clock().now()
         return True
 
     def tracked_gate_distance(self):
-        if not self.local_pose_is_available() or self.tracked_midpoint is None:
+        if self.tracked_midpoint_body is None:
             return None
-        midpoint_x, midpoint_y = self.tracked_midpoint
+
         return math.hypot(
-            midpoint_x - self.local_x,
-            midpoint_y - self.local_y,
+            self.tracked_midpoint_body[0],
+            self.tracked_midpoint_body[1],
         )
 
     def vehicle_motion_ready(self):
@@ -471,6 +535,24 @@ class Task1GateMission(Node):
         self.saved_gate_width = gate_width
         self.saved_usable_half_width = usable_half_width
         self.saved_pass_target = (target_x, target_y)
+
+        if self.tracked_midpoint_body is None:
+            return False
+
+        body_mid_x, body_mid_y = self.tracked_midpoint_body
+
+        body_heading = math.atan2(
+            body_mid_y,
+            body_mid_x,
+        )
+
+        self.saved_pass_heading = math.atan2(
+            math.sin(self.local_yaw + body_heading),
+            math.cos(self.local_yaw + body_heading),
+        )
+
+        self.pass_started_at = self.get_clock().now()
+
         self.gate_entry_side = entry_distance
         self.previous_pass_signed_distance = entry_distance
         self.previous_pass_lateral_offset = entry_lateral
@@ -528,6 +610,8 @@ class Task1GateMission(Node):
         self.saved_gate_width = None
         self.saved_usable_half_width = None
         self.saved_pass_target = None
+        self.saved_pass_heading = None
+        self.pass_started_at = None
         self.gate_entry_side = None
         self.previous_pass_signed_distance = None
         self.previous_pass_lateral_offset = None
@@ -687,6 +771,70 @@ class Task1GateMission(Node):
         self.last_target_body = tuple(target_body)
         self.publish_diagnostics(reason)
         return True
+
+    def publish_body_target(self, target_body, speed, reason):
+        if target_body is None:
+            self.publish_stop(f'{reason}_TARGET_UNAVAILABLE')
+            return False
+
+        x_body, y_body = target_body
+
+        if not all(
+            math.isfinite(v)
+            for v in (x_body, y_body, speed)
+        ):
+            self.publish_stop(f'{reason}_NONFINITE_TARGET')
+            return False
+
+        target = NavigationTarget()
+        target.header.stamp = self.get_clock().now().to_msg()
+        target.header.frame_id = 'base_link'
+        target.target.x = float(x_body)
+        target.target.y = float(y_body)
+        target.target.z = 0.0
+        target.desired_speed = float(max(0.0, speed))
+        target.stop = False
+
+        self.target_pub.publish(target)
+
+        self.last_target_map = None
+        self.last_target_body = (
+            float(x_body),
+            float(y_body),
+        )
+
+        self.publish_diagnostics(reason)
+        return True
+
+    def publish_heading_target(self, heading, speed, reason):
+        if (
+            heading is None
+            or self.local_yaw is None
+            or not self.local_pose_is_fresh()
+        ):
+            self.publish_stop(f'{reason}_HEADING_UNAVAILABLE')
+            return False
+
+        error = math.atan2(
+            math.sin(heading - self.local_yaw),
+            math.cos(heading - self.local_yaw),
+        )
+
+        # target_controller requires x > 0. Keep the virtual target
+        # in the forward hemisphere while allowing yaw correction.
+        limit = math.radians(85.0)
+        error = max(-limit, min(limit, error))
+
+        distance = self.pass_heading_target_distance
+
+        return self.publish_body_target(
+            (
+                distance * math.cos(error),
+                distance * math.sin(error),
+            ),
+            speed,
+            reason,
+        )
 
     def publish_debug_telemetry(self):
         stamp = self.get_clock().now().to_msg()
@@ -885,84 +1033,55 @@ class Task1GateMission(Node):
 
         if self.phase == MissionPhase.PASS_GATE:
             if not self.vehicle_motion_ready():
-                self.publish_state(
-                    f'PASS_GATE_{self.current_gate}_BLOCKED: '
-                    'vehicle not ARMED + GUIDED'
+                self.abort_to_wait_gate(
+                    'vehicle readiness lost during heading-held passage'
                 )
                 self.publish_stop('PASS_VEHICLE_NOT_READY')
                 return
 
             if not self.local_pose_is_fresh():
                 age = self.local_pose_age()
-                age_text = 'none' if age is None else f'{age:.2f}s'
-                self.publish_state(
-                    f'PASS_GATE_{self.current_gate}_BLOCKED: '
-                    f'local pose stale ({age_text})'
+                age_text = (
+                    'none'
+                    if age is None
+                    else f'{age:.2f}s'
+                )
+
+                self.abort_to_wait_gate(
+                    f'yaw/local pose stale during passage ({age_text})'
                 )
                 self.publish_stop('PASS_LOCAL_POSE_STALE')
                 return
 
-            signed_distance = self.signed_gate_distance()
-            lateral_offset = self.gate_lateral_offset()
-            if signed_distance is None or lateral_offset is None:
-                self.publish_stop('PASS_GEOMETRY_UNAVAILABLE')
-                return
-
-            if not self.gate_crossed:
-                previous_signed = self.previous_pass_signed_distance
-                previous_lateral = self.previous_pass_lateral_offset
-
-                if (
-                    previous_signed is not None
-                    and previous_signed < 0.0
-                    and signed_distance >= 0.0
-                ):
-                    denominator = signed_distance - previous_signed
-                    fraction = (
-                        -previous_signed / denominator
-                        if abs(denominator) > 1e-9
-                        else 1.0
-                    )
-                    crossing_lateral = (
-                        lateral_offset
-                        if previous_lateral is None
-                        else previous_lateral
-                        + fraction * (lateral_offset - previous_lateral)
-                    )
-
-                    if (
-                        self.saved_usable_half_width is None
-                        or abs(crossing_lateral) > self.saved_usable_half_width
-                    ):
-                        self.abort_to_wait_gate(
-                            'crossed outside safe gate corridor; '
-                            f'lateral={crossing_lateral:.2f} m'
-                        )
-                        self.publish_stop('PASS_CROSSED_OUTSIDE_CORRIDOR')
-                        return
-
-                    self.gate_crossed = True
-                    self.crossing_lateral_offset = crossing_lateral
-                    self.publish_state(
-                        f'CROSSED_GATE_{self.current_gate}: '
-                        f'lateral_offset={crossing_lateral:.2f} m'
-                    )
-
-                self.previous_pass_signed_distance = signed_distance
-                self.previous_pass_lateral_offset = lateral_offset
-
-            if self.gate_crossed and signed_distance >= self.pass_clear_distance:
-                self.finish_current_gate(
-                    'crossed saved gate line and cleared '
-                    f'{signed_distance:.2f} m'
+            if (
+                self.saved_pass_heading is None
+                or self.pass_started_at is None
+            ):
+                self.abort_to_wait_gate(
+                    'passage heading/timer unavailable'
                 )
-                self.publish_stop('PASS_GATE_CLEARED')
+                self.publish_stop('PASS_HEADING_UNAVAILABLE')
                 return
 
-            self.publish_map_target(
-                self.saved_pass_target,
+            elapsed = (
+                self.get_clock().now() - self.pass_started_at
+            ).nanoseconds / 1e9
+
+            if elapsed >= self.pass_duration:
+                self.gate_crossed = True
+
+                self.finish_current_gate(
+                    'completed heading-held passage after '
+                    f'{elapsed:.1f} s'
+                )
+
+                self.publish_stop('PASS_GATE_TIMED_CLEAR')
+                return
+
+            self.publish_heading_target(
+                self.saved_pass_heading,
                 self.pass_speed,
-                'PASSAGE_TARGET',
+                'PASSAGE_HEADING_HOLD',
             )
             return
 
@@ -971,7 +1090,7 @@ class Task1GateMission(Node):
             return
 
         if self.phase == MissionPhase.TRACK_GATE:
-            if self.tracked_midpoint is None:
+            if self.tracked_midpoint_body is None:
                 self.phase = MissionPhase.WAIT_GATE
                 self.publish_state(
                     f'WAIT_GATE_{self.current_gate}: no remembered gate geometry'
@@ -1010,10 +1129,10 @@ class Task1GateMission(Node):
                 self.publish_stop('PASS_GATE_COMMITTED')
                 return
 
-            self.publish_map_target(
-                self.tracked_midpoint,
+            self.publish_body_target(
+                self.tracked_midpoint_body,
                 self.track_speed,
-                'TRACKING_GATE',
+                'TRACKING_GATE_LIDAR',
             )
             return
 

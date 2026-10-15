@@ -14,14 +14,26 @@ task1_gate_mission:
     min_gate_confidence: 0.75
 
     # Preserve the latest validated two_gate_follower motion setting.
-    track_speed: 0.02
-    pass_speed: 0.02
+    track_speed: 0.06
+    pass_speed: 0.08
 
     # Fixed-frame passage logic ported from two_gate_follower.
-    pass_commit_distance: 2.0
+    pass_commit_distance: 1.25
     pass_target_distance: 1.5
     pass_clear_distance: 1.0
+
+    # Passage completion is intentionally independent of GPS X/Y.
+    # The gate bearing measured by LiDAR is converted to a yaw heading
+    # at commit, then held for a bounded clearance interval.
+    pass_duration: 35.0
+    pass_heading_target_distance: 5.0
+
     local_pose_timeout: 1.50
+
+    # MAVROS local pose is currently ~2 Hz. PoseHistory requires the
+    # surrounding pose samples to be within 2*tolerance of each other.
+    # 0.35 s allows interpolation across ~0.5 s pose intervals plus jitter.
+    pose_history_tolerance: 0.35
     pass_edge_margin: 0.0
 
     # Fixed-frame gate identity; higher confidence elsewhere cannot steal it.

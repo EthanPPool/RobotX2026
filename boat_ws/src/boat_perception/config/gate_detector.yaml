@@ -9,7 +9,10 @@ gate_detector:
     min_buoy_confidence: 0.60
 
     # RobotX gate separation: 6-10 ft = 1.83-3.05 m.
-    min_gate_width: 1.83
+    # Sensor-space tolerance: physical RobotX gate minimum is 1.83 m,
+    # but validated Unitree/perception measurements of a real gate are
+    # approximately 1.75-1.83 m.
+    min_gate_width: 1.70
     max_gate_width: 3.05
     nominal_gate_width: 2.44
     gate_width_tolerance: 0.75

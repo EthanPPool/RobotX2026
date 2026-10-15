@@ -40,24 +40,65 @@ class GateSelector:
 
     def choose(self, candidates, pose):
         if self.anchor is not None:
-            matches = [g for g in candidates if self.matches(self.anchor, g)]
-            return min(matches, key=lambda g: (math.dist(g.center, self.anchor.center),
-                                               -g.confidence)) if matches else None
+            matches = [
+                gate
+                for gate in candidates
+                if self.matches(self.anchor, gate)
+            ]
+
+            if not matches:
+                return None
+
+            chosen = min(
+                matches,
+                key=lambda gate: (
+                    math.dist(
+                        gate.center,
+                        self.anchor.center,
+                    ),
+                    -gate.confidence,
+                ),
+            )
+
+            # Preserve identity while allowing the map coordinate of the same
+            # observed gate to move gradually with GNSS drift.
+            self.anchor = chosen
+            return chosen
+
         x, y, yaw = pose
         eligible = []
+
         for gate in candidates:
-            if any(self.matches(old, gate) for old in self.passed):
+            if any(
+                self.matches(old, gate)
+                for old in self.passed
+            ):
                 continue
-            dx, dy = gate.center[0] - x, gate.center[1] - y
-            bearing = math.atan2(math.sin(math.atan2(dy, dx) - yaw),
-                                 math.cos(math.atan2(dy, dx) - yaw))
+
+            dx = gate.center[0] - x
+            dy = gate.center[1] - y
+
+            bearing = math.atan2(
+                math.sin(math.atan2(dy, dx) - yaw),
+                math.cos(math.atan2(dy, dx) - yaw),
+            )
+
             if abs(bearing) <= self.max_bearing:
                 eligible.append(gate)
+
         if not eligible:
             return None
-        chosen = min(eligible, key=lambda g: (math.dist(g.center, (x, y)),
-                                              -g.confidence, g.center))
-        self.anchor = chosen  # Fixed acquisition anchor prevents gradual hopping.
+
+        chosen = min(
+            eligible,
+            key=lambda gate: (
+                math.dist(gate.center, (x, y)),
+                -gate.confidence,
+                gate.center,
+            ),
+        )
+
+        self.anchor = chosen
         return chosen
 
     def complete(self, geometry):
