@@ -97,11 +97,39 @@ class IdentityTests(unittest.TestCase):
         self.assertIsNone(selector.choose([geometry(12, confidence=.99)], (2, 0, 0)))
         self.assertEqual(selector.anchor.center, (5., 0.))
 
-    def test_gradual_drift_cannot_move_fixed_anchor_to_another_gate(self):
+    def test_gradual_drift_updates_anchor_but_rejects_sudden_jump(self):
         selector = GateSelector()
+
         selector.choose([geometry(5)], (0, 0, 0))
-        self.assertIsNotNone(selector.choose([geometry(5.6)], (0, 0, 0)))
-        self.assertIsNone(selector.choose([geometry(6.2)], (0, 0, 0)))
+
+        # Gradual map translation from GNSS drift should preserve
+        # the identity of the already-locked physical gate.
+        self.assertIsNotNone(
+            selector.choose([geometry(5.6)], (0, 0, 0))
+        )
+        self.assertIsNotNone(
+            selector.choose([geometry(6.2)], (0, 0, 0))
+        )
+
+        # The rolling anchor should now represent the most recent
+        # accepted observation.
+        self.assertEqual(
+            selector.anchor.center,
+            (6.2, 0.),
+        )
+
+        # A sudden displacement larger than the association limit
+        # must still be rejected rather than allowing another gate
+        # to steal the lock.
+        self.assertIsNone(
+            selector.choose([geometry(8.0)], (0, 0, 0))
+        )
+
+        # Rejection must not move the existing anchor.
+        self.assertEqual(
+            selector.anchor.center,
+            (6.2, 0.),
+        )
 
     def test_marker_order_can_reverse_without_losing_identity(self):
         selector = GateSelector()
