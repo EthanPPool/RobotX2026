@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>robotx_buoy_interpretation</name>
+  <version>0.1.0</version>
+  <description>Parallel USV and optional UAV model-output interpretation for competition planning.</description>
+  <maintainer email="robotx@example.com">RobotX Team</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>robotx_coordination</exec_depend>
+  <exec_depend>robotx_coordination_interfaces</exec_depend>
+  <exec_depend>boat_interfaces</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>
