@@ -1,0 +1,19 @@
+name: Competition planner checks
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  routing-and-references:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install algorithm dependency
+        run: python3 -m pip install 'numpy>=1.24,<3'
+      - name: Check mission routing, temporal states, references and adapters
+        run: bash scripts/test_competition_planner.sh

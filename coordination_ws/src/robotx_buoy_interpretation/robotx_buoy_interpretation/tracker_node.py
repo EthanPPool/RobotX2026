@@ -65,7 +65,8 @@ class BuoyTrackerNode(Node):
             b.track_id = r['track_id']
             b.position.x, b.position.y, b.position.z = r['x'], r['y'], r['z']
             for key in ('uncertainty', 'radius', 'color', 'confidence', 'light_state',
-                        'sources', 'active_sources', 'actionable', 'semantic_conflict'):
+                        'sources', 'active_sources', 'actionable', 'semantic_conflict',
+                        'color_source', 'position_source'):
                 setattr(b, key, r[key])
             b.position_observed_at = Time(seconds=r['position_stamp']).to_msg()
             b.color_observed_at = Time(seconds=r['color_stamp']).to_msg()
