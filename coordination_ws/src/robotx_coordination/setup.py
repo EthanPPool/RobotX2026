@@ -7,6 +7,6 @@ setup(name=name, version='0.1.0', packages=find_packages(),
                 ('share/'+name+'/launch',glob('launch/*.launch.py')),
                 ('share/'+name+'/config',glob('config/*.yaml'))],
     install_requires=['setuptools'], zip_safe=True,
-    maintainer='RobotX Team', maintainer_email='robotx@localhost',
+    maintainer='RobotX Team', maintainer_email='robotx@example.com',
     description='Shared-datum RobotX UAV survey and UUV following', license='MIT',
     entry_points={'console_scripts': ['gps_pose = robotx_coordination.gps_pose:main']})

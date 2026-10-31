@@ -1,0 +1,42 @@
+robotx_competition_planner:
+  ros__parameters:
+    datum_configured: false
+    map_frame: robotx_map
+    origin_latitude: 0.0
+    origin_longitude: 0.0
+    water_altitude: 0.0
+    # core = local USV interpretation; advanced = attempt-scoped UAV survey.
+    tier: core
+    expected_buoys: 10
+    # Flat, ordered convex polygon in shared map meters; set actual course bounds.
+    # No fabricated course boundary is enabled by default.
+    course_boundary_xy: [0.0]
+    odometry_topic: /usv/coordination/odometry
+    scan_topic: /scan
+    pose_timeout: 0.5
+    map_timeout: 0.5
+    scan_timeout: 0.5
+    # Collect the complete survey across multiple images, then latch per attempt.
+    survey_semantic_age: 90.0
+    max_pose_variance: 1.0
+    # Set to the actual hull's circumscribed radius, including protrusions.
+    hull_radius: 0.9
+    clearance: 0.35
+    orbit_radius: 3.0
+    max_orbit_radius: 6.0
+    passage_range: 6.0
+    abeam_tolerance: 0.2
+    graph_samples: 16
+    max_search_states: 40000
+    max_markers: 20
+    max_semantic_markers: 8
+    speed: 0.25
+    acceleration: 0.15
+    yaw_rate: 0.2
+    yaw_acceleration: 0.15
+    preview_dt: 0.1
+    arrival_tolerance: 0.25
+    heading_tolerance: 0.2
+    tracking_soft_limit: 0.4
+    tracking_hard_limit: 1.2
+    min_confidence: 0.6

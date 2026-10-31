@@ -3,10 +3,11 @@
     A retained obstacle is not proof of currently observed water. This map never
     declares free space. Semantic freshness is independent of map publication.
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import math
 
 from .contracts import Observation
+from .beacon import BeaconHistory
 
 
 @dataclass
@@ -14,6 +15,7 @@ class Track:
     track_id: int
     evidence: dict = field(default_factory=dict)
     semantics: dict = field(default_factory=dict)
+    beacons: dict = field(default_factory=dict)
 
 
 class BuoyTracker:
@@ -105,6 +107,12 @@ class BuoyTracker:
                 track = Track(self.next_id)
                 self.next_id += 1
                 self.tracks.append(track)
+            if o.light_state == 'unknown' and o.confidence >= self.min_confidence:
+                history = track.beacons.setdefault(o.source, BeaconHistory())
+                interpreted = history.update(o.color, o.stamp, o.confidence)
+                if interpreted is not None:
+                    o = replace(o, color=interpreted[0], light_state=interpreted[1],
+                                confidence=interpreted[2])
             previous = track.evidence.get(o.source)
             if previous is not None:
                 if o.stamp < previous.stamp:
@@ -161,5 +169,6 @@ class BuoyTracker:
                 light_state=light_state, position_stamp=p.stamp,
                 color_stamp=s.stamp if s is not None else 0.,
                 sources=sorted(t.evidence), active_sources=sorted(o.source for o in active),
-                actionable=bool(active and color != 'unknown'), semantic_conflict=conflict))
+                actionable=bool(active and color != 'unknown'), semantic_conflict=conflict,
+                color_source=s.source if color != 'unknown' else '', position_source=p.source))
         return result

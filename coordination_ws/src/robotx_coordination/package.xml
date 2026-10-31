@@ -2,7 +2,7 @@
 <package format="3">
   <name>robotx_coordination</name><version>0.1.0</version>
   <description>RobotX georeferenced mapping and coordinated navigation</description>
-  <maintainer email="robotx@localhost">RobotX Team</maintainer><license>MIT</license>
+  <maintainer email="robotx@example.com">RobotX Team</maintainer><license>MIT</license>
   <buildtool_depend>ament_python</buildtool_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>python3-numpy</exec_depend>

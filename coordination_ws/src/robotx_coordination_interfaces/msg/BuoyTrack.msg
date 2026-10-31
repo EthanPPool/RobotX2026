@@ -11,3 +11,6 @@ string[] sources
 string[] active_sources
 bool actionable
 bool semantic_conflict
+# Provenance of the selected estimates, independent of all contributing sources.
+string color_source
+string position_source

@@ -45,7 +45,7 @@ The current repository's UAV `downward_camera.py` explicitly uses `enableUndisto
 
 An example member is `{detection_id: 4, u: 320.0, v: 240.0, width: 30.0, height: 50.0, color: blue, confidence: 0.92, light_state: unknown}`. This is a contract example, not a built-in detection.
 
-Color assignment alone does not establish flashing vs steady beacon state. A temporal measurement from the teammate's model or another temporal interpreter must supply that field; leave it unknown otherwise. The planner must wait for required semantics rather than infer a task rule from unknown data.
+Color assignment alone does not establish flashing vs steady beacon state. The teammate may provide that field directly; otherwise the shared tracker now estimates it from explicit tracked color observations. It requires two measured on/off cycles for flashing, or 2.5 seconds of contiguous observations for steady/inactive. A gap longer than 0.75 seconds resets the temporal history. Black must be an explicit observation of that buoy's inactive beacon; an unknown or missed detection is never OFF. The learned active color is retained through an observed off phase. The planner waits if temporal evidence is insufficient.
 
 ## Coordinate and timestamp requirements
 
@@ -112,4 +112,4 @@ Inspect `/perception/buoys/usv/status`, `/perception/buoys/uav/status`, `/missio
 
 Run `bash scripts/test_buoy_interpretation.sh` with Python 3 and numpy. No ROS installation, model weights, camera or network is required for these tests. They cover real geometry/tracker algorithms and ROS adapter callbacks with transport stubs. They are not hardware or DDS tests.
 
-The teammate must connect their actual model output to the two detection topics. Camera rectification, TF extrinsics, shared datum, field uncertainty bounds, and camera/model latency must be measured on the devices. The competition mission state machine, route optimization, timed trajectory generation, and professor-controller/ESC integration are not implemented by this interpretation-only package.
+The teammate must connect their actual model output to the two detection topics. Camera rectification, TF extrinsics, shared datum, field uncertainty bounds, and camera/model latency must be measured on the devices. The separate `robotx_competition_planner` package now implements Core/Advanced Safe Passage routing and timed trajectory previews; see `docs/COMPETITION_PLANNER.md`. Professor-controller/ESC integration is a separate consumer of those references.
