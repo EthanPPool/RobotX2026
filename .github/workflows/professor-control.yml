@@ -1,0 +1,15 @@
+name: Professor pathing/control checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  law-and-ros-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install 'numpy>=1.24,<3'
+      - run: bash scripts/test_competition_planner.sh
+      - run: bash scripts/test_professor_control.sh

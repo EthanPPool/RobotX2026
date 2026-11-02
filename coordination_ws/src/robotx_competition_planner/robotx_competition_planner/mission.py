@@ -5,6 +5,8 @@ from .models import angle_difference
 from .routing import Course
 from .trajectory import orbit, polyline
 
+ATTEMPT_WIDE_SIDE_RULES = True
+
 
 class SafePassage:
     PHASES = ('APPROACH_ENTRY', 'CIRCLE_ENTRY', 'TRANSIT', 'CIRCLE_EXIT')
@@ -87,6 +89,12 @@ class SafePassage:
         if math.dist(previous.point, pose.point) > self.config.speed*max(dt, 0.01)*3+0.5:
             self.reason = 'POSE_JUMP'
             return False
+        # Legality is attempt-wide, including approach and both blue orbits.
+        legal, bits = self.course.passages(previous.point, pose.point, pose.yaw,
+                                           local_only=self.state != 'TRANSIT')
+        if not legal:
+            self.stop('WRONG_SIDE_PASSAGE_'+self.state)
+            return False
         if not permitted:
             self.reason = 'WAITING_FOR_FRESH_LOCAL_CLEARANCE'
             return False
@@ -108,10 +116,6 @@ class SafePassage:
             else:
                 self.last_angle = None
         elif self.state == 'TRANSIT':
-            legal, bits = self.course.passages(previous.point, pose.point, pose.yaw)
-            if not legal:
-                self.stop('WRONG_SIDE_PASSAGE')
-                return False
             self.passed_mask |= bits
         # Freeze the moving reference if the real boat falls behind; keep its
         # current nearby reference valid so feedback can recover tracking error.
