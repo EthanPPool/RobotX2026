@@ -11,4 +11,5 @@ setup(name=name, version='0.1.0', packages=find_packages(),
     maintainer='RobotX Team', maintainer_email='robotx@example.com', license='MIT',
     description='Competition Safe Passage routing and trajectory references',
     entry_points={'console_scripts': [
-        'competition_planner = robotx_competition_planner.node:main']})
+        'competition_planner = robotx_competition_planner.node:main',
+        'incremental_planner = robotx_competition_planner.incremental_node:main']})

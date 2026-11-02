@@ -2327,6 +2327,10 @@ class MavrosCommandBridge(Node):
             )
             return
 
+        self.publish_autonomy_command()
+
+    def publish_autonomy_command(self):
+        """Velocity backend hook; authority checks have already succeeded."""
         if self.command_is_zero(
             self.last_command
         ):

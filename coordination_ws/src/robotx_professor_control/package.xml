@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>robotx_professor_control</name><version>0.1.0</version>
+  <description>Professor two-thruster control law, local path binding and calibrated force backend.</description>
+  <maintainer email="robotx@example.com">RobotX Team</maintainer><license>MIT</license>
+  <buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>rclpy</exec_depend><exec_depend>robotx_coordination</exec_depend>
+  <exec_depend>robotx_competition_planner</exec_depend><exec_depend>robotx_coordination_interfaces</exec_depend>
+  <exec_depend>robotx_control_interfaces</exec_depend><exec_depend>boat_vehicle</exec_depend>
+  <exec_depend>nav_msgs</exec_depend><exec_depend>std_msgs</exec_depend><exec_depend>mavros_msgs</exec_depend>
+  <exec_depend>ament_index_python</exec_depend><exec_depend>launch</exec_depend><exec_depend>launch_ros</exec_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>

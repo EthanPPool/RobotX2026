@@ -1,0 +1,66 @@
+# Copy and edit for your site. No invented geographic datum/course is enabled.
+/**:
+  ros__parameters:
+    datum_configured: false
+    map_frame: robotx_map
+    origin_latitude: 0.0
+    origin_longitude: 0.0
+    water_altitude: 0.0
+robotx_competition_planner:
+  ros__parameters:
+    course_boundary_xy: [0.0]
+    odometry_topic: /usv/coordination/odometry
+    scan_topic: /scan
+    extra_planning_margin: 0.5
+    observation_distance: 8.0
+    hull_radius: 0.9
+    clearance: 0.35
+    speed: 0.25
+    acceleration: 0.15
+    yaw_rate: 0.2
+    yaw_acceleration: 0.15
+    preview_dt: 0.1
+professor_controller:
+  ros__parameters:
+    odometry_topic: /usv/coordination/odometry
+    body_frame: boat/base_link
+    velocity_source: pose_history
+    derivative_filter_tau: 0.25
+    control_dt: 0.05
+    pose_timeout: 0.15
+    reference_timeout: 0.15
+    capture_sync_tolerance: 0.05
+    max_pose_variance: 0.25
+    # These are provisional local-domain/force limits for shadow review.
+    max_along_error_m: 1.0
+    max_cross_error_m: 1.0
+    max_yaw_error_rad: 0.35
+    max_measured_acceleration: 2.0
+    max_measured_yaw_acceleration: 2.0
+    cross_track_lookahead_m: 5.0
+    max_force_n: 10.0
+    max_force_rate_nps: 20.0
+    nominal_right_force_n: 0.0
+    nominal_left_force_n: 0.0
+    # Confirm notebook physical conventions and the proposed path-frame binding.
+    units_confirmed_si: false
+    axis_binding_confirmed: false
+    nominal_trim_confirmed: false
+mavros_command_bridge:
+  ros__parameters:
+    # Optional force backend; do not run beside the ordinary bridge.
+    hardware_output_enabled: false
+    deployment_contract_confirmed: false
+    calibration_file: ''
+    force_timeout: 0.15
+    state_timeout: 0.5
+    autonomy_enabled: false
+    software_estop: true
+    allowed_modes: [MANUAL]
+    operator_mode: MANUAL
+    stop_mode: HOLD
+    mission_complete_mode: LOITER
+    # Isolate the unused base-class Twist publisher/subscriber.
+    input_topic: /control/unused_legacy_velocity
+    output_topic: /control/unused_legacy_velocity_output
+    battery_required_for_propulsion: true

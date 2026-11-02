@@ -10,6 +10,8 @@ import math
 from robotx_coordination.geometry import point_in_polygon, segment_distance
 from .models import finite
 
+ATTEMPT_WIDE_SIDE_RULES = True
+
 
 @dataclass(frozen=True)
 class Orbit:
@@ -34,12 +36,12 @@ class MissionPlan:
 
 
 class Course:
-    def __init__(self, markers, boundary, config):
+    def __init__(self, markers, boundary, config, allow_partial=False):
         config.validate()
         self.config = config
         self.markers = tuple(markers)
         self.boundary = tuple(tuple(p) for p in boundary)
-        if not 2 <= len(self.markers) <= config.max_markers:
+        if not (0 if allow_partial else 2) <= len(self.markers) <= config.max_markers:
             raise ValueError('Invalid or excessive buoy count')
         if len({m.track_id for m in self.markers}) != len(self.markers):
             raise ValueError('Duplicate buoy track IDs')
@@ -79,7 +81,7 @@ class Course:
         return self.inside(a) and self.inside(b) and all(
             segment_distance(m.point, a, b) > self.inflated(m) for m in self.markers)
 
-    def passages(self, a, b, heading=None):
+    def passages(self, a, b, heading=None, local_only=False):
         """Return (legal, bits); closest on each side at abeam is authoritative.
 
         For graph edges, heading is the forward segment direction. Measured
@@ -95,21 +97,28 @@ class Course:
             ax, ay = marker.x-a[0], marker.y-a[1]
             bx, by = marker.x-b[0], marker.y-b[1]
             along_a, along_b = ax*dx+ay*dy, bx*dx+by*dy
-            if not (along_a >= 0 and along_b <= 0):
+            crossed = along_a >= 0 and along_b <= 0
+            # Measured reverse motion can also pass abeam. Graph edges always
+            # face their direction of travel, so their forward test is sufficient.
+            if heading is not None:
+                crossed = crossed or along_a <= 0 <= along_b
+            if not crossed:
                 continue
             fraction = along_a/(along_a-along_b) if along_a != along_b else 0.
             p = (a[0]+fraction*(b[0]-a[0]), a[1]+fraction*(b[1]-a[1]))
             lateral = dx*(marker.y-p[1])-dy*(marker.x-p[0])
-            if abs(lateral) > self.config.passage_range:
+            # Outside the scored transit, apply a conservative local guard.
+            # passage_range is an engineering policy, not a handbook distance.
+            if local_only and abs(lateral) > self.config.passage_range:
                 continue
             closer = False
             for other in self.markers:
                 if other.track_id == marker.track_id:
                     continue
                 ox, oy = other.x-p[0], other.y-p[1]
-                side, longitudinal = dx*oy-dy*ox, dx*ox+dy*oy
-                if (side*lateral > 0 and abs(side) < abs(lateral)-1e-8
-                        and abs(longitudinal) <= self.config.abeam_tolerance):
+                side = dx*oy-dy*ox
+                # The closest buoy on this side need not itself be abeam.
+                if side*lateral > 0 and math.hypot(ox, oy) < abs(lateral)-1e-8:
                     closer = True
                     break
             if closer:
@@ -117,7 +126,9 @@ class Course:
             if (marker.role == 'red' and lateral >= 0) or (
                     marker.role == 'green' and lateral <= 0):
                 return False, bits
-            bits |= self.bits[marker.track_id]
+            # passage_range limits credited goals, never wrong-side legality.
+            if abs(lateral) <= self.config.passage_range:
+                bits |= self.bits[marker.track_id]
         return True, bits
 
     def orbit_clear(self, marker, radius):
@@ -129,21 +140,44 @@ class Course:
         if any(segment_distance(marker.point, a, b) <= edge_margin
                for a, b in zip(self.boundary, self.boundary[1:]+self.boundary[:1])):
             return False
-        return all(other.track_id == marker.track_id or
+        clear = all(other.track_id == marker.track_id or
                    abs(math.dist(marker.point, other.point)-radius) > self.inflated(other)
                    for other in self.markers)
+        return clear
+
+    def orbit_sides_clear(self, arc):
+        """Check exact abeam events on a circular, forward-facing trajectory.
+
+        A fixed marker is abeam when its radial bearing equals the boat's radial
+        bearing or differs by pi. Test a tiny chord around every such event,
+        using the exact tangent heading. This has no angular sampling blind spot.
+        """
+        for marker in self.semantic:
+            if math.dist(marker.point, arc.center) < 1e-9:
+                continue
+            bearing = math.atan2(marker.y-arc.center[1], marker.x-arc.center[0])
+            for angle in (bearing, bearing+math.pi):
+                eps = 1e-5
+                points = [(arc.center[0]+arc.radius*math.cos(angle+arc.direction*d),
+                           arc.center[1]+arc.radius*math.sin(angle+arc.direction*d))
+                          for d in (-eps, eps)]
+                heading = angle+arc.direction*math.pi/2
+                if not self.passages(*points, heading=heading, local_only=True)[0]:
+                    return False
+        return True
 
     def orbit(self, marker, near, direction):
         c = self.config
         radius = max(c.orbit_radius, self.inflated(marker)+0.2)
         while radius <= c.max_orbit_radius+1e-9:
-            if self.orbit_clear(marker, radius):
-                return Orbit(marker.point, radius,
-                    math.atan2(near[1]-marker.y, near[0]-marker.x), direction)
+            arc = Orbit(marker.point, radius,
+                math.atan2(near[1]-marker.y, near[0]-marker.x), direction)
+            if self.orbit_clear(marker, radius) and self.orbit_sides_clear(arc):
+                return arc
             radius += 0.5
-        raise ValueError('No complete collision-free orbit within configured radius')
+        raise ValueError('No complete collision-free, side-legal orbit within configured radius')
 
-    def route(self, start, goal, enforce_sides=False, required_mask=None):
+    def route(self, start, goal, enforce_sides=False, required_mask=None, local_sides=False):
         if not self.point_clear(start) or not self.point_clear(goal):
             raise ValueError('Route endpoint is outside clearance or course boundary')
         required = self.full_mask if required_mask is None else required_mask
@@ -168,7 +202,7 @@ class Course:
                 for j, point in enumerate(nodes):
                     if index == j or not self.segment_clear(nodes[index], point):
                         continue
-                    legal, bits = self.passages(nodes[index], point) if enforce_sides else (True, 0)
+                    legal, bits = self.passages(nodes[index], point, local_only=local_sides) if enforce_sides else (True, 0)
                     if legal:
                         result.append((j, bits & required, math.dist(nodes[index], point)))
                 cache[index] = result
@@ -204,7 +238,7 @@ class Course:
             raise ValueError('Need unique flashing-blue entry, steady-blue exit and passage markers')
         entry_orbit = self.orbit(entry[0], pose.point, -1)
         exit_orbit = self.orbit(exit_[0], entry[0].point, 1)
-        approach = self.route(pose.point, entry_orbit.start)
+        approach = self.route(pose.point, entry_orbit.start, True, required_mask=0, local_sides=True)
         transit = self.route(entry_orbit.start, exit_orbit.start, True)
         return MissionPlan(approach, entry_orbit, transit, exit_orbit,
                            tuple(m.track_id for m in self.semantic))
