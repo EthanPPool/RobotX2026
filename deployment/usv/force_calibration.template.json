@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "calibrated": false,
+  "manual_mix_verified": false,
+  "_instructions": "Populate measured data at the specified battery range. Force is positive vessel-forward. command is signed normalized motor output after the configured FCU mixer. No illustrative thrust values are supplied. Confirm both model-force signs and the actual mixer matrix. Optional columns: rpm, shaft_torque_nm, pwm_us, measured_motor_voltage_v. Use the same columns in every row; unknown quantities must be omitted, never invented.",
+  "battery_voltage_range_v": [0.0, 0.0],
+  "model_force_to_forward_sign": [0, 0],
+  "manual_to_motor_matrix": [0.0, 0.0, 0.0, 0.0],
+  "right": [{"force_n": 0.0, "command": 0.0}],
+  "left": [{"force_n": 0.0, "command": 0.0}]
+}
