@@ -2,8 +2,9 @@
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition, UnlessCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -31,14 +32,13 @@ def generate_launch_description():
         DeclareLaunchArgument('input_rectified', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('calibration_timeout', default_value='0.1'),
         DeclareLaunchArgument('allow_static_calibration', default_value='false', choices=['true', 'false']),
-        Node(package='robotx_buoy_interpretation', executable='hsv_color_clusters',
-             name='usv_hsv_clusters', output='screen',
-             condition=IfCondition(LaunchConfiguration('start_hsv')),
-             parameters=[LaunchConfiguration('hsv_config'), calibration, {
-                 'image_topic': LaunchConfiguration('image_topic'),
-                 'camera_info_topic': camera, 'detections_topic': detections,
-                 'input_rectified': ParameterValue(LaunchConfiguration('input_rectified'), value_type=bool),
-             }]),
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(os.path.join(share, 'launch', 'hsv_camera.launch.py')),
+            condition=IfCondition(LaunchConfiguration('start_hsv')),
+            launch_arguments={name: LaunchConfiguration(name) for name in (
+                'image_topic', 'hsv_config', 'camera_info_topic', 'detections_topic',
+                'input_rectified', 'calibration_timeout', 'allow_static_calibration',
+            )}.items()),
         Node(package='robotx_buoy_interpretation', executable='usv_buoy_interpretation',
              name='usv_buoy_interpretation', condition=IfCondition(LaunchConfiguration('start_hsv')),
              parameters=[config, calibration, {

@@ -1,11 +1,15 @@
 """Run explicitly in a built Kilted environment, not the offline unit suite."""
 import copy
+import importlib.util
+import os
 import time
 import unittest
 
 import numpy as np
 import rclpy
 from cv_bridge import CvBridge
+from ament_index_python.packages import get_package_share_directory
+from launch_ros.actions import Node as LaunchNode
 from rclpy.executors import SingleThreadedExecutor
 from sensor_msgs.msg import CameraInfo
 from robotx_coordination_interfaces.msg import BuoyColorDetectionArray
@@ -14,6 +18,16 @@ from robotx_buoy_interpretation.hsv_node import HsvColorClusters, detection_arra
 
 
 class RosHsvTests(unittest.TestCase):
+    def test_camera_launch_starts_only_one_camera_processing_node(self):
+        source = os.path.join(get_package_share_directory('robotx_buoy_interpretation'),
+                              'launch', 'hsv_camera.launch.py')
+        spec = importlib.util.spec_from_file_location('hsv_camera_launch', source)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        nodes = [e for e in module.generate_launch_description().entities
+                 if isinstance(e, LaunchNode)]
+        self.assertEqual(len(nodes), 1)
+
     def test_real_messages_and_producer(self):
         rclpy.init()
         producer = None
@@ -30,6 +44,7 @@ class RosHsvTests(unittest.TestCase):
             while producer.publisher.get_subscription_count() == 0 and time.monotonic() < deadline:
                 executor.spin_once(timeout_sec=.05)
             self.assertGreater(producer.publisher.get_subscription_count(), 0)
+            self.assertEqual(producer.get_subscriptions_info_by_topic('/perception/objects'), [])
             pixels = np.zeros((200, 300, 3), np.uint8)
             pixels[50:80, 60:90] = (0, 0, 255)
             image = CvBridge().cv2_to_imgmsg(pixels, encoding='bgr8')

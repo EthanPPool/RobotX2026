@@ -7,6 +7,53 @@ image-only boxes with /perception/objects at capture time, then emits physical
 observations on /perception/buoys/usv for the existing tracker and planner.
 No control algorithm, motor interface, physical distance estimate, or TF is added.
 
+## Independent camera operation and the existing mission handoff
+
+Run the camera producer separately from the existing LiDAR detector:
+```bash
+ros2 launch robotx_buoy_interpretation hsv_camera.launch.py \
+  image_topic:=/ACTUAL_USV_IMAGE_TOPIC
+```
+This starts only HSV processing. The camera driver must already provide images
+and CameraInfo. It does not subscribe to LiDAR objects or start the interpreter,
+tracker, planner, or controller. Camera results continue without LiDAR.
+The existing boat_perception/perception.launch.py continues owning the independent
+LiDAR object detector and /perception/objects. LiDAR results continue without HSV.
+
+Start the existing association/tracking path separately:
+```bash
+ros2 launch robotx_buoy_interpretation interpretation.launch.py \
+  start_hsv:=false config:=/ABSOLUTE/PATH/TO/site_interpretation.yaml
+```
+For this separate-launch form, configure the interpreter's CameraInfo/detection
+topics and calibration policy in site_interpretation.yaml to match the camera
+launch. Do not also start a second interpreter/tracker through usv_shadow.
+Alternatively, run hsv_camera separately and use the existing usv_shadow launch
+with start_hsv:=false to start association, tracking, and mission processing once.
+The combined start_hsv:=true launch includes the same standalone camera launch.
+
+The mission logic already accepts this exact contract:
+
+Camera Image/CameraInfo -> HSV -> /perception/usv/color_detections
+
+LiDAR -> /perception/objects
+
+Both -> existing USV association -> /perception/buoys/usv -> existing buoy_tracker
+-> /mission/buoys -> existing incremental planner -> timed professor references.
+
+The existing tracker owns temporal beacon classification and persistent buoy
+identity. The existing planner owns entry/exit selection, passage side, search,
+orbits, and replanning. HSV is an interchangeable upstream color producer;
+none of those algorithms is replaced. No camera pixel is treated as map geometry.
+The Advanced tier's existing aerial semantic provenance policy is also unchanged.
+
+RGB-only HSV supplies visible colors, not explicit OFF measurements. Existing
+temporal classification still requires its documented evidence: repeated blue
+can establish steady blue; missing color cannot establish inactive or flashing.
+Explicit observed OFF/temporal-model evidence must arrive through the established
+camera model contract when needed. This separation does not claim that bright-only
+HSV alone measures every mission beacon state.
+
 ## Build and launch (Ubuntu 24.04 / ROS 2 Kilted)
 
 Install system dependencies with rosdep on the development machine, including

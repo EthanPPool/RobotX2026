@@ -1,6 +1,6 @@
 # Competition buoy interpretation: USV independent, UAV optional
 
-This addition builds both interpretation branches around the teammate's color-assignment model. It does not substitute an HSV classifier, assume two PoR gates, modify the professor's controller, or connect a new source to propulsion. It prepares a common competition-planner input. Automatic competition task decisions and the PID/ESC connection remain subsequent integration work.
+Both interpretation branches accept the established camera color-assignment contract. The teammate model and the optional HSV camera producer are interchangeable upstream producers on that interface. The existing interpreter associates image semantics with geometry, the tracker owns persistent identity and temporal classification, and the incremental mission planner consumes the resulting tracks. HSV does not replace those algorithms or connect directly to propulsion.
 
 Reference source: `https://github.com/EthanPPool/RobotX2026`, main commit `50855604c97658b4221bf921d66927ee9dd902fa`. Existing device workspaces may contain newer offline edits; use the additive installer rather than overwrite their existing packages.
 
@@ -110,7 +110,7 @@ Inspect `/perception/buoys/usv/status`, `/perception/buoys/uav/status`, `/missio
 
 ## Verification and remaining integration
 
-Run `bash scripts/test_buoy_interpretation.sh` with Python 3 and numpy. No ROS installation, model weights, camera or network is required for these tests. They cover real geometry/tracker algorithms and ROS adapter callbacks with transport stubs. They are not hardware or DDS tests.
+Run `bash scripts/test_buoy_interpretation.sh` with Python 3, numpy and OpenCV. No ROS installation, model weights, camera or network is required for these offline tests. They cover real HSV/geometry/tracker algorithms and ROS adapter callbacks with transport stubs. The separate HSV GitHub workflow builds Kilted and tests the real camera producer and generated ROS messages; neither suite is a hardware test.
 
 The teammate must connect their actual model output to the two detection topics. Camera rectification, TF extrinsics, shared datum, field uncertainty bounds, and camera/model latency must be measured on the devices. The separate `robotx_competition_planner` package now implements Core/Advanced Safe Passage routing and timed trajectory previews; see `docs/COMPETITION_PLANNER.md`. Professor-controller/ESC integration is a separate consumer of those references.
 

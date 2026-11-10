@@ -30,4 +30,5 @@ jobs:
           source /opt/ros/kilted/setup.bash
           source coordination_ws/install-buoy-interpretation/setup.bash
           python3 tests/buoy_interpretation/ros_hsv_check.py
+          ros2 launch robotx_buoy_interpretation hsv_camera.launch.py --show-args
           ros2 launch robotx_buoy_interpretation interpretation.launch.py --show-args
