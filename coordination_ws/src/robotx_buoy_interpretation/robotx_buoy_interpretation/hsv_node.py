@@ -90,7 +90,10 @@ class HsvColorClusters(Node):
         if not capture_valid(stamp, self.get_clock().now().nanoseconds, self.last_stamp, self.timeout):
             self.pending = None
             return
-        info = select_capture_calibration(self.calibrations, stamp/1e9,
+        # Use the same conversion as CameraInfo and the existing interpreter.
+        # Dividing epoch nanoseconds can round differently from sec + nsec*1e-9
+        # and misclassify an equal-time calibration as a future measurement.
+        info = select_capture_calibration(self.calibrations, stamp_seconds(image.header.stamp),
             image.header.frame_id, self.calibration_timeout, self.allow_static)
         if info is None:
             self.warn('Waiting for matching capture-time camera calibration')

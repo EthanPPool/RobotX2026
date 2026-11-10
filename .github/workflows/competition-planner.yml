@@ -14,6 +14,6 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install algorithm dependency
-        run: python3 -m pip install 'numpy>=1.24,<3'
+        run: python3 -m pip install 'numpy>=1.24,<3' opencv-python-headless
       - name: Check mission routing, temporal states, references and adapters
         run: bash scripts/test_competition_planner.sh
