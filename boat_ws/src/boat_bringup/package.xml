@@ -17,6 +17,7 @@
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
   <exec_depend>boat_perception</exec_depend>
+  <exec_depend>robotx_buoy_interpretation</exec_depend>
   <exec_depend>boat_mission</exec_depend>
   <exec_depend>boat_control</exec_depend>
   <exec_depend>boat_vehicle</exec_depend>

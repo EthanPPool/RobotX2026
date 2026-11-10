@@ -20,7 +20,7 @@ jobs:
       - name: Install ROS image dependencies
         run: |
           apt-get update
-          apt-get install -y ros-kilted-cv-bridge ros-kilted-tf2-ros python3-opencv python3-colcon-common-extensions
+          apt-get install -y ros-kilted-cv-bridge ros-kilted-tf2-ros ros-kilted-visualization-msgs ros-kilted-sensor-msgs-py python3-opencv python3-scipy python3-yaml python3-colcon-common-extensions
       - name: Build interfaces and interpretation package
         shell: bash
         run: bash scripts/build_buoy_interpretation.sh
@@ -30,5 +30,8 @@ jobs:
           source /opt/ros/kilted/setup.bash
           source coordination_ws/install-buoy-interpretation/setup.bash
           python3 tests/buoy_interpretation/ros_hsv_check.py
+          python3 tests/buoy_interpretation/ros_two_gate_check.py
           ros2 launch robotx_buoy_interpretation hsv_camera.launch.py --show-args
+          ros2 launch robotx_buoy_interpretation two_gate_colors.launch.py --show-args
+          ros2 launch boat_perception perception.launch.py --show-args
           ros2 launch robotx_buoy_interpretation interpretation.launch.py --show-args

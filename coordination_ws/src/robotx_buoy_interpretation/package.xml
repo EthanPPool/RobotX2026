@@ -10,6 +10,7 @@
   <exec_depend>robotx_coordination</exec_depend>
   <exec_depend>robotx_coordination_interfaces</exec_depend>
   <exec_depend>boat_interfaces</exec_depend>
+  <exec_depend>boat_perception</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>nav_msgs</exec_depend>

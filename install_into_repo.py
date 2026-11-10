@@ -27,7 +27,8 @@ def planned_changes(source, target):
                      if p.is_file() and '__pycache__' not in p.parts and p.suffix != '.pyc')
     paths.extend(interface/'msg'/f'{name}.msg' for name in MESSAGES)
     paths.extend(Path(p) for p in ('install_into_repo.py', 'scripts/build_buoy_interpretation.sh',
-                 'scripts/test_buoy_interpretation.sh', 'docs/BUOY_INTERPRETATION.md', 'docs/HSV_COLOR_CLUSTERS.md'))
+                 'scripts/test_buoy_interpretation.sh', 'docs/BUOY_INTERPRETATION.md',
+                 'docs/HSV_COLOR_CLUSTERS.md', 'docs/TWO_GATE_HSV.md', 'scripts/build_two_gate_hsv.sh'))
     copies = []
     for relative in sorted(paths):
         origin, destination = source/relative, target/relative

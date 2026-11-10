@@ -2,7 +2,13 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
@@ -67,7 +73,29 @@ def generate_launch_description():
         executable='gate_detector',
         name='gate_detector',
         output='screen',
-        parameters=[gate_config],
+        parameters=[gate_config, {
+            'objects_topic': PythonExpression([
+                "'/perception/colored_objects' if '", LaunchConfiguration('use_hsv_colors'),
+                "' == 'true' else '/perception/objects'",
+            ]),
+            'require_red_green': ParameterValue(LaunchConfiguration('use_hsv_colors'), value_type=bool),
+        }],
     )
 
-    return LaunchDescription([buoy_detector, gate_detector])
+    arguments = [
+        DeclareLaunchArgument('use_hsv_colors', default_value='false', choices=['true', 'false']),
+        DeclareLaunchArgument('start_hsv_camera', default_value='true', choices=['true', 'false']),
+        DeclareLaunchArgument('image_topic', default_value=''),
+        DeclareLaunchArgument('camera_info_topic', default_value='/usv/camera/color/camera_info'),
+        DeclareLaunchArgument('input_rectified', default_value='false', choices=['true', 'false']),
+        DeclareLaunchArgument('allow_static_calibration', default_value='false', choices=['true', 'false']),
+    ]
+    colors = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(PathJoinSubstitution([
+            FindPackageShare('robotx_buoy_interpretation'), 'launch', 'two_gate_colors.launch.py',
+        ])), condition=IfCondition(LaunchConfiguration('use_hsv_colors')),
+        launch_arguments={n: LaunchConfiguration(n) for n in (
+            'start_hsv_camera', 'image_topic', 'camera_info_topic', 'input_rectified',
+            'allow_static_calibration',
+        )}.items())
+    return LaunchDescription(arguments + [buoy_detector, colors, gate_detector])

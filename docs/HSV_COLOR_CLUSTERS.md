@@ -1,5 +1,9 @@
 # USV HSV RGB light detection
 
+For the existing **two-gate mission**, use [TWO_GATE_HSV.md](TWO_GATE_HSV.md).
+It connects HSV colors directly to the existing gate detector and task1_gate_mission;
+the competition-planner integration described below is a separate optional path.
+
 The existing robotx_buoy_interpretation package now supplies hsv_color_clusters.
 It publishes robotx_coordination_interfaces/BuoyColorDetectionArray on
 /perception/usv/color_detections. The existing USV interpreter combines these
@@ -62,7 +66,8 @@ cv_bridge and python3-opencv, before the existing field build script:
 source /opt/ros/kilted/setup.bash
 rosdep install --from-paths coordination_ws/src/robotx_coordination \
   coordination_ws/src/robotx_coordination_interfaces \
-  coordination_ws/src/robotx_buoy_interpretation boat_ws/src/boat_interfaces --ignore-src -r -y
+  coordination_ws/src/robotx_buoy_interpretation boat_ws/src/boat_interfaces \
+  boat_ws/src/boat_perception --ignore-src -r -y
 bash scripts/build_buoy_interpretation.sh
 source coordination_ws/install-buoy-interpretation/setup.bash
 ros2 launch robotx_buoy_interpretation interpretation.launch.py \

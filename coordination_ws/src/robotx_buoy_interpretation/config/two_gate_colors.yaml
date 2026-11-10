@@ -1,0 +1,15 @@
+two_gate_colors:
+  ros__parameters:
+    objects_topic: /perception/objects
+    output_topic: /perception/colored_objects
+    detections_topic: /perception/usv/color_detections
+    camera_info_topic: /usv/camera/color/camera_info
+    local_position_topic: /mavros/local_position/pose
+    capture_timeout: 0.5
+    max_sync: 0.1
+    association_wait: 0.2
+    calibration_timeout: 0.1
+    allow_static_calibration: false
+    min_color_confidence: 0.6
+    bbox_padding: 8.0
+    pose_history_tolerance: 0.15

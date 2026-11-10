@@ -36,6 +36,12 @@ def generate_launch_description():
     fcu_url = LaunchConfiguration('fcu_url')
 
     arguments = [
+        DeclareLaunchArgument('use_hsv_colors', default_value='false', choices=['true', 'false']),
+        DeclareLaunchArgument('start_hsv_camera', default_value='true', choices=['true', 'false']),
+        DeclareLaunchArgument('image_topic', default_value=''),
+        DeclareLaunchArgument('camera_info_topic', default_value='/usv/camera/color/camera_info'),
+        DeclareLaunchArgument('input_rectified', default_value='false', choices=['true', 'false']),
+        DeclareLaunchArgument('allow_static_calibration', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('start_sensors', default_value='true'),
         DeclareLaunchArgument('start_perception', default_value='true'),
         DeclareLaunchArgument('start_mission', default_value='true'),
@@ -65,6 +71,10 @@ def generate_launch_description():
     perception = IncludeLaunchDescription(
         package_launch('boat_perception', 'perception.launch.py'),
         condition=IfCondition(start_perception),
+        launch_arguments={n: LaunchConfiguration(n) for n in (
+            'use_hsv_colors', 'start_hsv_camera', 'image_topic', 'camera_info_topic',
+            'input_rectified', 'allow_static_calibration',
+        )}.items(),
     )
 
     mission = IncludeLaunchDescription(

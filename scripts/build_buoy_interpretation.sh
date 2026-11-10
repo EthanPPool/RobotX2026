@@ -8,6 +8,6 @@ cd "$repo_dir/coordination_ws"
 colcon --log-base log-buoy-interpretation build --symlink-install \
   --build-base build-buoy-interpretation --install-base install-buoy-interpretation \
   --base-paths src/robotx_coordination src/robotx_coordination_interfaces \
-    src/robotx_buoy_interpretation ../boat_ws/src/boat_interfaces \
+    src/robotx_buoy_interpretation ../boat_ws/src/boat_interfaces ../boat_ws/src/boat_perception \
   --packages-up-to robotx_buoy_interpretation
 echo "Source $repo_dir/coordination_ws/install-buoy-interpretation/setup.bash"
