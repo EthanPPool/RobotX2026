@@ -1,0 +1,24 @@
+usv_hsv_clusters:
+  ros__parameters:
+    # No USV camera topic is invented; set image_topic at launch.
+    image_topic: ''
+    camera_info_topic: /usv/camera/color/camera_info
+    detections_topic: /perception/usv/color_detections
+    input_rectified: false
+    max_image_age: 0.5
+    calibration_timeout: 0.1
+    allow_static_calibration: false
+    min_area: 400
+    max_area_fraction: 0.40
+    min_fill: 0.10
+    min_solidity: 0.30
+    min_aspect: 0.20
+    max_aspect: 5.0
+    # 1 preserves small LED rims; no opening/closing change with 1x1.
+    kernel: 1
+    max_detections: 100
+    reject_border: false
+    red_hsv: [0, 230, 120, 15, 255, 255, 165, 230, 120, 179, 255, 255]
+    # Same saturation/value as tested red, awaiting independent field tuning.
+    green_hsv: [35, 230, 120, 85, 255, 255]
+    blue_hsv: [95, 230, 120, 135, 255, 255]

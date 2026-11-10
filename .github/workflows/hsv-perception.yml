@@ -1,0 +1,33 @@
+name: HSV RGB perception
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  pixels-and-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install numpy opencv-python-headless
+      - run: bash scripts/test_buoy_interpretation.sh
+  kilted-build-and-transport:
+    runs-on: ubuntu-24.04
+    container: ros:kilted-ros-base
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ROS image dependencies
+        run: |
+          apt-get update
+          apt-get install -y ros-kilted-cv-bridge ros-kilted-tf2-ros python3-opencv python3-colcon-common-extensions
+      - name: Build interfaces and interpretation package
+        shell: bash
+        run: bash scripts/build_buoy_interpretation.sh
+      - name: Check real ROS producer and launch description
+        shell: bash
+        run: |
+          source /opt/ros/kilted/setup.bash
+          source coordination_ws/install-buoy-interpretation/setup.bash
+          python3 tests/buoy_interpretation/ros_hsv_check.py
+          ros2 launch robotx_buoy_interpretation interpretation.launch.py --show-args

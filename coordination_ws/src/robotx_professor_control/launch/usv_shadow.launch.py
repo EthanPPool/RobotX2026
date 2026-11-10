@@ -51,6 +51,14 @@ def generate_launch_description():
             "interpretation_config",
             default_value=interpretation_default,
         ),
+        DeclareLaunchArgument("start_hsv", default_value="false", choices=["true", "false"]),
+        DeclareLaunchArgument("image_topic", default_value=""),
+        DeclareLaunchArgument("camera_info_topic", default_value="/usv/camera/color/camera_info"),
+        DeclareLaunchArgument("input_rectified", default_value="false", choices=["true", "false"]),
+        DeclareLaunchArgument("allow_static_calibration", default_value="false", choices=["true", "false"]),
+        DeclareLaunchArgument("calibration_timeout", default_value="0.1"),
+        DeclareLaunchArgument("hsv_config", default_value=os.path.join(
+            get_package_share_directory("robotx_buoy_interpretation"), "config", "hsv_clusters.yaml")),
         IncludeLaunchDescription(
             shared_launch(
                 "robotx_buoy_interpretation",
@@ -59,6 +67,13 @@ def generate_launch_description():
             launch_arguments={
                 "config": interpretation,
                 "source_mode": "usv_only",
+                "start_hsv": LaunchConfiguration("start_hsv"),
+                "image_topic": LaunchConfiguration("image_topic"),
+                "camera_info_topic": LaunchConfiguration("camera_info_topic"),
+                "input_rectified": LaunchConfiguration("input_rectified"),
+                "hsv_config": LaunchConfiguration("hsv_config"),
+                "allow_static_calibration": LaunchConfiguration("allow_static_calibration"),
+                "calibration_timeout": LaunchConfiguration("calibration_timeout"),
             }.items(),
         ),
         IncludeLaunchDescription(

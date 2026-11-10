@@ -113,3 +113,8 @@ Inspect `/perception/buoys/usv/status`, `/perception/buoys/uav/status`, `/missio
 Run `bash scripts/test_buoy_interpretation.sh` with Python 3 and numpy. No ROS installation, model weights, camera or network is required for these tests. They cover real geometry/tracker algorithms and ROS adapter callbacks with transport stubs. They are not hardware or DDS tests.
 
 The teammate must connect their actual model output to the two detection topics. Camera rectification, TF extrinsics, shared datum, field uncertainty bounds, and camera/model latency must be measured on the devices. The separate `robotx_competition_planner` package now implements Core/Advanced Safe Passage routing and timed trajectory previews; see `docs/COMPETITION_PLANNER.md`. Professor-controller/ESC integration is a separate consumer of those references.
+
+## HSV camera producer
+
+See [HSV_COLOR_CLUSTERS.md](HSV_COLOR_CLUSTERS.md) for the RGB light thresholds,
+image-topic/calibration inputs, build instructions, and integrated USV launch.

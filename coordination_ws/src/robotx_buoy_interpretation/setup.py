@@ -13,5 +13,6 @@ setup(name=name, version='0.1.0', packages=find_packages(),
     entry_points={'console_scripts': [
         'usv_buoy_interpretation = robotx_buoy_interpretation.usv_node:main',
         'uav_buoy_interpretation = robotx_buoy_interpretation.uav_node:main',
+        'hsv_color_clusters = robotx_buoy_interpretation.hsv_node:main',
         'buoy_tracker = robotx_buoy_interpretation.tracker_node:main',
     ]})
